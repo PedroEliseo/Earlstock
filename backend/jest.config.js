@@ -6,7 +6,7 @@ export default {
   testMatch: ['**/*.test.ts'],
   // Source imports use `.js` (required by NodeNext); map them back to the `.ts` files.
   moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
-  // Creates and migrates the isolated test database (only when TEST_DATABASE_URL is set).
+  // Recreates and migrates the isolated test database (only when TEST_DATABASE_URL is set).
   globalSetup: '<rootDir>/tests/setup/global-setup.ts',
   // Database test files share one test database and truncate it between tests, so files must not
   // run concurrently. (Jest only parallelizes when it has no fast timings cached, e.g. on fresh CI

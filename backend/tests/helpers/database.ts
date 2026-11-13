@@ -34,7 +34,7 @@ export async function truncateAll(pool: Pool): Promise<void> {
   if (!name.endsWith('_test')) {
     throw new Error(`Refusing to truncate "${name}": tests may only modify a *_test database.`);
   }
-  await pool.query('TRUNCATE price_quotes, stocks, provider_api_usage RESTART IDENTITY');
+  await pool.query('TRUNCATE stocks RESTART IDENTITY');
 }
 
 /** A pool whose connections are always refused (nothing listens on port 1), for tests that must not reach a DB. */

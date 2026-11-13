@@ -30,14 +30,14 @@ export function createStocksService(repository: StocksRepository) {
       }
     },
 
-    /** Stocks with price history must be kept; the foreign key on price_quotes enforces it atomically. */
+    /** A stock still referenced by another table cannot be deleted; its foreign key enforces this atomically. */
     async delete(id: string): Promise<void> {
       let deleted: boolean;
       try {
         deleted = await repository.deleteById(id);
       } catch (err) {
         if (isPgError(err, PgErrorCode.ForeignKeyViolation)) {
-          throw new ConflictError(`Stock ${id} has price quotes and cannot be deleted`, {
+          throw new ConflictError(`Stock ${id} is still referenced and cannot be deleted`, {
             cause: err,
           });
         }

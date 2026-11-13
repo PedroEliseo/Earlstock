@@ -1,12 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { isPgError, PgErrorCode } from '../../db/errors.js';
-import {
-  ConflictError,
-  NotFoundError,
-  QuotaExceededError,
-  ValidationError,
-  type ValidationIssue,
-} from '../errors.js';
+import { ConflictError, NotFoundError, ValidationError, type ValidationIssue } from '../errors.js';
 
 interface ErrorBody {
   message: string;
@@ -30,7 +24,6 @@ export function errorHandler(
 ): void {
   const [status, body] = toErrorResponse(err);
   if (status >= 500) console.error(err);
-  if (err instanceof QuotaExceededError) res.set('Retry-After', String(err.retryAfterSeconds));
   res.status(status).json({ error: body });
 }
 
@@ -38,7 +31,6 @@ function toErrorResponse(err: unknown): [number, ErrorBody] {
   if (err instanceof ValidationError) return [400, { message: err.message, details: err.issues }];
   if (err instanceof NotFoundError) return [404, { message: err.message }];
   if (err instanceof ConflictError) return [409, { message: err.message }];
-  if (err instanceof QuotaExceededError) return [429, { message: err.message }];
 
   // Fallback for constraint violations a service did not translate into a domain error.
   // The raw PostgreSQL message is never sent: it can leak schema details and key values.

@@ -9,8 +9,6 @@ describe('loadEnv', () => {
       PORT: 3000,
       DATABASE_URL,
       DATABASE_POOL_MAX: 10,
-      MARKET_DATA_PROVIDER: 'demo',
-      EODHD_DAILY_CALL_BUDGET: 15,
     });
   });
 
@@ -35,71 +33,14 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ DATABASE_URL: 'mysql://localhost/db' })).toThrow(/postgres/);
   });
 
-  describe('market data provider', () => {
-    it('defaults to demo mode, which needs no API key', () => {
-      const env = loadEnv({ DATABASE_URL });
-
-      expect(env.MARKET_DATA_PROVIDER).toBe('demo');
-      expect(env.EODHD_API_KEY).toBeUndefined();
+  it('ignores variables it does not define, such as obsolete ones left in an existing .env', () => {
+    const env = loadEnv({
+      DATABASE_URL,
+      MARKET_DATA_PROVIDER: 'eodhd', // previously required EODHD_API_KEY; must no longer matter
+      EODHD_DAILY_CALL_BUDGET: '15',
     });
 
-    it('accepts demo mode with an empty API key, as in .env.example', () => {
-      expect(
-        loadEnv({ DATABASE_URL, MARKET_DATA_PROVIDER: 'demo', EODHD_API_KEY: '' }),
-      ).toMatchObject({ MARKET_DATA_PROVIDER: 'demo' });
-    });
-
-    it.each([
-      ['missing', {}],
-      ['empty', { EODHD_API_KEY: '' }],
-      ['whitespace only', { EODHD_API_KEY: '   ' }],
-    ])('fails fast when eodhd is selected and the API key is %s', (_case, key) => {
-      expect(() => loadEnv({ DATABASE_URL, MARKET_DATA_PROVIDER: 'eodhd', ...key })).toThrow(
-        /is required when MARKET_DATA_PROVIDER=eodhd\s+→ at EODHD_API_KEY/,
-      );
-    });
-
-    it('accepts eodhd with an API key, trimming whitespace', () => {
-      const env = loadEnv({
-        DATABASE_URL,
-        MARKET_DATA_PROVIDER: 'eodhd',
-        EODHD_API_KEY: ' key-123 ',
-      });
-
-      expect(env).toMatchObject({ MARKET_DATA_PROVIDER: 'eodhd', EODHD_API_KEY: 'key-123' });
-    });
-
-    it('rejects unknown providers', () => {
-      expect(() => loadEnv({ DATABASE_URL, MARKET_DATA_PROVIDER: 'yahoo' })).toThrow(
-        /MARKET_DATA_PROVIDER/,
-      );
-    });
-
-    it('validates the daily call budget', () => {
-      expect(loadEnv({ DATABASE_URL, EODHD_DAILY_CALL_BUDGET: '5' }).EODHD_DAILY_CALL_BUDGET).toBe(
-        5,
-      );
-      expect(() => loadEnv({ DATABASE_URL, EODHD_DAILY_CALL_BUDGET: '-1' })).toThrow(
-        /EODHD_DAILY_CALL_BUDGET/,
-      );
-    });
-
-    it('never includes the API key in validation errors', () => {
-      const error = (() => {
-        try {
-          loadEnv({
-            DATABASE_URL,
-            MARKET_DATA_PROVIDER: 'eodhd',
-            EODHD_API_KEY: 'secret-key',
-            PORT: 'x',
-          });
-        } catch (err) {
-          return err as Error;
-        }
-        throw new Error('expected loadEnv to throw');
-      })();
-
-      expect(error.message).not.toContain('secret-key');
-    });
+    expect(env).not.toHaveProperty('MARKET_DATA_PROVIDER');
+    expect(env).not.toHaveProperty('EODHD_DAILY_CALL_BUDGET');
   });
 });

@@ -1,16 +1,13 @@
 import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { createPool } from './db/pool.js';
-import { createMarketData } from './modules/market-data/market-data.factory.js';
 
 const env = loadEnv();
 const pool = createPool(env);
-const marketData = createMarketData(env, pool);
-const app = createApp({ pool, marketData });
+const app = createApp({ pool });
 
 const server = app.listen(env.PORT, () => {
   console.log(`EarlStock API listening on port ${String(env.PORT)} (${env.NODE_ENV})`);
-  console.log(`Market data provider: ${marketData.provider.id}`);
 });
 
 /** Stop accepting HTTP traffic, let in-flight requests finish, then release DB connections. */

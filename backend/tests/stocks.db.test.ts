@@ -119,21 +119,5 @@ describeWithDatabase('stocks API (database)', () => {
     it('responds 404 for a nonexistent stock', async () => {
       await request(app).delete(`/api/stocks/${UNKNOWN_ID}`).expect(404);
     });
-
-    it('responds 409 and keeps the stock when it has price quotes', async () => {
-      const { id } = await createStock();
-      await pool.query(
-        `INSERT INTO price_quotes (stock_id, price, observed_at, provider) VALUES ($1, 189.5, now(), 'test')`,
-        [id],
-      );
-
-      const res = await request(app).delete(`/api/stocks/${id}`);
-
-      expect(res.status).toBe(409);
-      expect(res.body).toEqual({
-        error: { message: `Stock ${id} has price quotes and cannot be deleted` },
-      });
-      await request(app).get(`/api/stocks/${id}`).expect(200);
-    });
   });
 });

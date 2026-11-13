@@ -10,18 +10,6 @@ export class ConflictError extends Error {
   override readonly name = 'ConflictError';
 }
 
-/** A usage quota is used up. `retryAfterSeconds` tells clients when to try again. */
-export class QuotaExceededError extends Error {
-  override readonly name = 'QuotaExceededError';
-
-  constructor(
-    message: string,
-    readonly retryAfterSeconds: number,
-  ) {
-    super(message);
-  }
-}
-
 export interface ValidationIssue {
   path: string;
   message: string;
