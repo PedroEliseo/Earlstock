@@ -123,10 +123,14 @@ export function assertSafeTestDatabase(
 }
 
 /**
- * Drops and recreates the test database through a separate maintenance connection. The server is
- * asked which database that connection is on, so the DROP can never run from the target itself.
+ * Runs `action` on a separate maintenance connection (to the `postgres` database), after asking the
+ * server which database that connection is on, so a DROP can never run from the target itself.
  */
-export async function recreateTestDatabase(testUrl: string, target: DatabaseTarget): Promise<void> {
+async function withMaintenanceConnection(
+  testUrl: string,
+  target: DatabaseTarget,
+  action: (client: Client, quotedName: string) => Promise<void>,
+): Promise<void> {
   if (target.database === MAINTENANCE_DATABASE) {
     throw new Error('Refusing to drop the maintenance database');
   }
@@ -150,10 +154,23 @@ export async function recreateTestDatabase(testUrl: string, target: DatabaseTarg
       );
     }
     // Identifiers cannot be bound as parameters; escapeIdentifier quotes the validated name.
-    const name = client.escapeIdentifier(target.database);
-    await client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-    await client.query(`CREATE DATABASE ${name}`);
+    await action(client, client.escapeIdentifier(target.database));
   } finally {
     await client.end();
   }
+}
+
+/** Drops (if present) and recreates a validated test database through the maintenance connection. */
+export function recreateTestDatabase(testUrl: string, target: DatabaseTarget): Promise<void> {
+  return withMaintenanceConnection(testUrl, target, async (client, name) => {
+    await client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    await client.query(`CREATE DATABASE ${name}`);
+  });
+}
+
+/** Drops a validated test database through the maintenance connection. */
+export function dropTestDatabase(testUrl: string, target: DatabaseTarget): Promise<void> {
+  return withMaintenanceConnection(testUrl, target, async (client, name) => {
+    await client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  });
 }
