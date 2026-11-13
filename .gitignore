@@ -1,0 +1,12 @@
+# Environment files hold credentials (docker compose reads ./.env for POSTGRES_* overrides).
+# Only documented templates are committed.
+.env
+.env.*
+!.env.example
+
+# Historical dataset: not committed until its source and redistribution licence are verified.
+data/
+backend/public/*.csv
+# Local database backups.
+backups/
+*.dump
