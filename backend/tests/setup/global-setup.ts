@@ -3,27 +3,115 @@ import { runner } from 'node-pg-migrate';
 import { Client } from 'pg';
 
 /**
- * Prepares the isolated test database once per `npm test` run: recreates it from scratch and
- * applies every migration, so each run starts empty and exercises the full migration chain.
+ * Prepares the isolated test database once per `npm test` run: recreates it from scratch (owned by
+ * the migration role) and applies every migration as that role, so each run starts empty and
+ * exercises the full migration chain with production-like privileges.
  * Database tests are skipped when TEST_DATABASE_URL is unset.
  */
 export default async function globalSetup(): Promise<void> {
-  const url = process.env['TEST_DATABASE_URL'];
-  if (!url) {
+  const urls = testDatabaseUrls();
+  if (!urls) {
     console.warn('\nTEST_DATABASE_URL is not set: database tests will be skipped.\n');
     return;
   }
 
-  const target = assertSafeTestDatabase(url, { DATABASE_URL: process.env['DATABASE_URL'] });
-  await recreateTestDatabase(url, target);
+  await recreateTestDatabase(urls.lifecycle, urls.target, roleOf(urls.migration));
   await runner({
-    databaseUrl: url,
+    databaseUrl: urls.migration,
     dir: path.resolve('migrations'),
     migrationsTable: 'pgmigrations',
     direction: 'up',
     checkOrder: true,
     log: () => undefined,
   });
+}
+
+export interface TestDatabaseUrls {
+  /** TEST_DATABASE_URL: administrative (superuser) connection, used ONLY to drop/create the database. */
+  lifecycle: string;
+  /** Migration-role credentials on the test database: migrations, fixtures, cleanup. */
+  migration: string;
+  /** API-role credentials on the test database: everything the application does. */
+  api: string;
+  target: DatabaseTarget;
+}
+
+/**
+ * Resolves the test-database URLs, or null when TEST_DATABASE_URL is unset (database tests skip).
+ * Role credentials are not configured twice: they come from MIGRATION_DATABASE_URL and
+ * MARKET_DATA_DATABASE_URL (the single source), retargeted at TEST_DATABASE_URL's server and
+ * database. Fails closed if anything is missing, ambiguous, or would share a database or a role.
+ */
+export function testDatabaseUrls(env: NodeJS.ProcessEnv = process.env): TestDatabaseUrls | null {
+  const lifecycle = env['TEST_DATABASE_URL'];
+  if (!lifecycle) return null;
+  const migrationSource = env['MIGRATION_DATABASE_URL'];
+  const apiSource = env['MARKET_DATA_DATABASE_URL'];
+  if (!migrationSource || !apiSource) {
+    throw new Error(
+      'TEST_DATABASE_URL is set, so MIGRATION_DATABASE_URL and MARKET_DATA_DATABASE_URL are required too (test roles use their credentials)',
+    );
+  }
+
+  const target = assertSafeTestDatabase(
+    lifecycle,
+    {
+      DATABASE_URL: env['DATABASE_URL'],
+      MIGRATION_DATABASE_URL: migrationSource,
+      MARKET_DATA_DATABASE_URL: apiSource,
+    },
+    env,
+  );
+  const migration = withCredentialsOf(migrationSource, lifecycle, 'MIGRATION_DATABASE_URL');
+  const api = withCredentialsOf(apiSource, lifecycle, 'MARKET_DATA_DATABASE_URL');
+
+  for (const [variable, url] of [
+    ['MIGRATION_DATABASE_URL', migration],
+    ['MARKET_DATA_DATABASE_URL', api],
+  ] as const) {
+    const derived = parseDatabaseTarget(variable, url, env);
+    if (
+      derived.host !== target.host ||
+      derived.port !== target.port ||
+      derived.database !== target.database
+    ) {
+      throw new Error(`${variable}: derived test URL does not target the test database`);
+    }
+  }
+  const roles = { lifecycle: roleOf(lifecycle), migration: roleOf(migration), api: roleOf(api) };
+  if (!roles.migration || !roles.api) {
+    throw new Error('MIGRATION_DATABASE_URL and MARKET_DATA_DATABASE_URL must name their roles');
+  }
+  if (roles.api === roles.migration || roles.api === roles.lifecycle) {
+    throw new Error(
+      'MARKET_DATA_DATABASE_URL must use a role distinct from the migration and administrative roles',
+    );
+  }
+  if (roles.migration === roles.lifecycle) {
+    throw new Error(
+      'MIGRATION_DATABASE_URL must use a role distinct from the administrative TEST_DATABASE_URL role',
+    );
+  }
+  return { lifecycle, migration, api, target };
+}
+
+/** The role (user name) a connection URL authenticates as. */
+export function roleOf(url: string): string {
+  return decodeURIComponent(new URL(url).username);
+}
+
+/** `target`'s server and database, with `credentialsFrom`'s user name and password. */
+function withCredentialsOf(credentialsFrom: string, target: string, variable: string): string {
+  let source: URL;
+  try {
+    source = new URL(credentialsFrom);
+  } catch {
+    throw new Error(`${variable} is not a valid URL`);
+  }
+  const url = new URL(target);
+  url.username = source.username;
+  url.password = source.password;
+  return url.toString();
 }
 
 /*
@@ -160,11 +248,18 @@ async function withMaintenanceConnection(
   }
 }
 
-/** Drops (if present) and recreates a validated test database through the maintenance connection. */
-export function recreateTestDatabase(testUrl: string, target: DatabaseTarget): Promise<void> {
+/**
+ * Drops (if present) and recreates a validated test database through the maintenance connection,
+ * owned by `owner` (the migration role), so migrations and fixtures never need the superuser.
+ */
+export function recreateTestDatabase(
+  testUrl: string,
+  target: DatabaseTarget,
+  owner: string,
+): Promise<void> {
   return withMaintenanceConnection(testUrl, target, async (client, name) => {
     await client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-    await client.query(`CREATE DATABASE ${name}`);
+    await client.query(`CREATE DATABASE ${name} OWNER ${client.escapeIdentifier(owner)}`);
   });
 }
 

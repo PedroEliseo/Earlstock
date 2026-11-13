@@ -1,7 +1,12 @@
 import type { Pool } from 'pg';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
-import { createTestPool, describeWithDatabase, truncateAll } from './helpers/database.js';
+import {
+  createFixturePool,
+  createTestPool,
+  describeWithDatabase,
+  truncateAll,
+} from './helpers/database.js';
 
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const UNKNOWN_ID = '019a7d3c-8f2e-7a51-9c3b-2d4e6f8a0b1c';
@@ -15,7 +20,7 @@ interface StockJson {
 const tickersOf = (res: request.Response) =>
   (res.body as { data: StockJson[] }).data.map((stock) => stock.ticker);
 
-/** The API is read-only, so test data is inserted directly (as the importer will do). */
+/** The API is read-only, so test data is inserted directly, as the owner role (as the importer will do). */
 async function insertStocks(pool: Pool, ...tickers: string[]): Promise<StockJson[]> {
   const { rows } = await pool.query<StockJson>(
     `INSERT INTO stocks (ticker) SELECT unnest($1::text[])
@@ -26,11 +31,15 @@ async function insertStocks(pool: Pool, ...tickers: string[]): Promise<StockJson
 }
 
 describeWithDatabase('stocks API (database)', () => {
-  const pool = createTestPool();
+  const pool = createTestPool(); // API role, as in production
+  const fixtures = createFixturePool(); // owner role, for test data
   const app = createApp({ pool });
 
-  beforeEach(() => truncateAll(pool));
-  afterAll(() => pool.end());
+  beforeEach(() => truncateAll(fixtures));
+  afterAll(async () => {
+    await pool.end();
+    await fixtures.end();
+  });
 
   describe('GET /api/stocks', () => {
     it('returns an empty page when there are no stocks', async () => {
@@ -41,7 +50,7 @@ describeWithDatabase('stocks API (database)', () => {
     });
 
     it('paginates with limit and offset, ordered by ticker, with the total count', async () => {
-      await insertStocks(pool, 'MSFT', 'BRK.B', 'AAPL');
+      await insertStocks(fixtures, 'MSFT', 'BRK.B', 'AAPL');
 
       const first = await request(app).get('/api/stocks?limit=2&offset=0');
       const second = await request(app).get('/api/stocks?limit=2&offset=2');
@@ -55,7 +64,7 @@ describeWithDatabase('stocks API (database)', () => {
     });
 
     it('returns id, ticker and createdAt, with a database-generated UUIDv7', async () => {
-      await insertStocks(pool, 'AAPL');
+      await insertStocks(fixtures, 'AAPL');
 
       const res = await request(app).get('/api/stocks');
 
@@ -67,7 +76,7 @@ describeWithDatabase('stocks API (database)', () => {
 
   describe('GET /api/stocks/:id', () => {
     it('returns an existing stock', async () => {
-      const [stock] = await insertStocks(pool, 'AAPL');
+      const [stock] = await insertStocks(fixtures, 'AAPL');
 
       const res = await request(app).get(`/api/stocks/${String(stock?.id)}`);
 

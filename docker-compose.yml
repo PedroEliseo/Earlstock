@@ -21,5 +21,31 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot provisioning: creates the EarlStock roles and transfers ownership to the schema-owner
+  # role (docker/postgres/provision.sql). Run it with `npm run db:provision` (or `npm run db:setup`)
+  # from backend/. It reads the role credentials from backend/.env.local, the same file the backend
+  # and migrations use, so there is a single source of truth for them.
+  postgres-provision:
+    image: postgres:18-alpine
+    profiles: ['setup'] # never started by a plain `docker compose up`
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+    env_file:
+      # Optional so other Compose commands work without it; provisioning itself fails closed if the
+      # URLs are missing.
+      - path: ./backend/.env.local
+        required: false
+    environment:
+      # Superuser connection, used only for provisioning (same defaults as the postgres service).
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-earlstock}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-earlstock}
+      PGDATABASE: postgres
+    volumes:
+      - ./docker/postgres/provision.sql:/provision.sql:ro
+    command: ['psql', '--no-psqlrc', '--quiet', '--file=/provision.sql']
+
 volumes:
   postgres-data:

@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { createTestPool, describeWithDatabase, truncateAll } from './helpers/database.js';
+import { createFixturePool, describeWithDatabase, truncateAll } from './helpers/database.js';
 
 /**
  * Database-level rules of the historical data model (stocks, daily_prices, data_imports).
@@ -70,7 +70,8 @@ describeWithDatabase('historical data model schema (database)', () => {
   let pool: Pool;
 
   beforeAll(() => {
-    pool = createTestPool();
+    // Constraints are exercised by writing, so this suite uses the migration (owner) role.
+    pool = createFixturePool();
   });
   beforeEach(() => truncateAll(pool));
   afterAll(() => pool.end());

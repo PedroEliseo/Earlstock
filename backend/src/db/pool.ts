@@ -7,7 +7,7 @@ import type { DatabaseEnv } from '../config/database.js';
  */
 export function createPool(config: DatabaseEnv): Pool {
   const pool = new Pool({
-    connectionString: config.DATABASE_URL,
+    connectionString: config.MARKET_DATA_DATABASE_URL,
     max: config.DATABASE_POOL_MAX,
     // Fail fast instead of waiting indefinitely when the database is unreachable or the pool is exhausted.
     connectionTimeoutMillis: 5_000,

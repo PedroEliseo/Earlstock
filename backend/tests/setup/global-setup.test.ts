@@ -1,4 +1,4 @@
-import { assertSafeTestDatabase, parseDatabaseTarget } from './global-setup.js';
+import { assertSafeTestDatabase, parseDatabaseTarget, testDatabaseUrls } from './global-setup.js';
 
 const TEST = 'postgres://tester:secret@localhost:5432/earlstock_test';
 const DEV = 'postgres://dev:other@localhost:5432/earlstock';
@@ -94,5 +94,89 @@ describe('assertSafeTestDatabase', () => {
     })();
 
     expect(error.message).not.toMatch(/secret|hunter2|tester|dev:/);
+  });
+});
+
+describe('testDatabaseUrls', () => {
+  const env: NodeJS.ProcessEnv = {
+    DATABASE_URL: 'postgres://admin:admin-pw@localhost:5432/earlstock',
+    TEST_DATABASE_URL: 'postgres://admin:admin-pw@localhost:5432/earlstock_test',
+    MIGRATION_DATABASE_URL: 'postgres://owner_role:owner-pw@localhost:5432/earlstock',
+    MARKET_DATA_DATABASE_URL: 'postgres://api_role:api-pw@localhost:5432/earlstock',
+  };
+
+  const errorOf = (overrides: NodeJS.ProcessEnv): Error => {
+    try {
+      testDatabaseUrls({ ...env, ...overrides });
+    } catch (err) {
+      return err as Error;
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it('returns null when TEST_DATABASE_URL is unset (database tests are skipped)', () => {
+    expect(testDatabaseUrls({ ...env, TEST_DATABASE_URL: undefined })).toBeNull();
+  });
+
+  it('retargets the role credentials at the test database (single source of credentials)', () => {
+    const urls = testDatabaseUrls(env);
+
+    expect(urls?.migration).toBe('postgres://owner_role:owner-pw@localhost:5432/earlstock_test');
+    expect(urls?.api).toBe('postgres://api_role:api-pw@localhost:5432/earlstock_test');
+    expect(urls?.lifecycle).toBe(env['TEST_DATABASE_URL']);
+    expect(urls?.target.database).toBe('earlstock_test');
+  });
+
+  it.each(['MIGRATION_DATABASE_URL', 'MARKET_DATA_DATABASE_URL'])(
+    'fails closed when %s is missing, instead of using the administrative role',
+    (variable) => {
+      expect(errorOf({ [variable]: undefined }).message).toMatch(/are required too/);
+    },
+  );
+
+  it('refuses when the API role is the migration role', () => {
+    expect(
+      errorOf({ MARKET_DATA_DATABASE_URL: 'postgres://owner_role:x@localhost:5432/earlstock' })
+        .message,
+    ).toMatch(/distinct from the migration and administrative roles/);
+  });
+
+  it('refuses when the API role is the administrative role', () => {
+    expect(
+      errorOf({ MARKET_DATA_DATABASE_URL: 'postgres://admin:x@localhost:5432/earlstock' }).message,
+    ).toMatch(/distinct from the migration and administrative roles/);
+  });
+
+  it('refuses when the migration role is the administrative role', () => {
+    expect(
+      errorOf({ MIGRATION_DATABASE_URL: 'postgres://admin:x@localhost:5432/earlstock' }).message,
+    ).toMatch(/MIGRATION_DATABASE_URL must use a role distinct/);
+  });
+
+  it.each(['MIGRATION_DATABASE_URL', 'MARKET_DATA_DATABASE_URL'])(
+    'refuses when %s uses the test database name itself',
+    (variable) => {
+      expect(
+        errorOf({ [variable]: 'postgres://other_role:x@localhost:5432/earlstock_test' }).message,
+      ).toMatch(/same name/);
+    },
+  );
+
+  it('fails closed on an unparseable role URL', () => {
+    expect(errorOf({ MARKET_DATA_DATABASE_URL: 'not a url' }).message).toMatch(/not a valid URL/);
+  });
+
+  it('never includes credentials in its errors', () => {
+    const messages = [
+      errorOf({ MIGRATION_DATABASE_URL: undefined }),
+      errorOf({
+        MARKET_DATA_DATABASE_URL: 'postgres://owner_role:owner-pw@localhost:5432/earlstock',
+      }),
+      errorOf({ MIGRATION_DATABASE_URL: 'postgres://admin:admin-pw@localhost:5432/earlstock' }),
+    ].map((error) => error.message);
+
+    for (const message of messages) {
+      expect(message).not.toMatch(/-pw|owner_role|api_role|admin:/);
+    }
   });
 });
