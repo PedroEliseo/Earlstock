@@ -33,6 +33,29 @@ export function commonCoverage(stocks: readonly StockCoverage[]): Coverage | nul
   return firstDate <= lastDate ? { firstDate, lastDate } : null;
 }
 
+/**
+ * Which stocks bound the common coverage: those whose history starts at the common first date
+ * while another starts earlier, and those whose history ends at the common last date while another
+ * ends later. Used to explain why the compared period is shorter than some stocks' histories.
+ */
+export function coverageConstraints(
+  stocks: readonly StockCoverage[],
+  common: Coverage,
+): { startsLate: string[]; endsEarly: string[] } {
+  const earliestFirst = stocks.reduce((d, s) => minDate(d, s.coverage.firstDate), common.firstDate);
+  const latestLast = stocks.reduce((d, s) => maxDate(d, s.coverage.lastDate), common.lastDate);
+  return {
+    startsLate:
+      earliestFirst < common.firstDate
+        ? stocks.filter((s) => s.coverage.firstDate === common.firstDate).map((s) => s.ticker)
+        : [],
+    endsEarly:
+      latestLast > common.lastDate
+        ? stocks.filter((s) => s.coverage.lastDate === common.lastDate).map((s) => s.ticker)
+        : [],
+  };
+}
+
 export interface AlignedSeries {
   ticker: string;
   /** Exact source prices (decimal strings) on each common date, for display. */

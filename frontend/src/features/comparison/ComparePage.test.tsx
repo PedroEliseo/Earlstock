@@ -36,12 +36,21 @@ describe('ComparePage', () => {
     expect(await screen.findByText('Select at least two stocks to compare')).toBeInTheDocument();
   });
 
-  it('compares on common dates only, from the first date all stocks share', async () => {
+  it('compares on common dates only and says which stock limits the period', async () => {
     open('?tickers=AAA,BBB&range=MAX');
 
     expect(await screen.findByTestId('chart')).toHaveTextContent(
       `AAA:120:100|BBB:120:100@${bbb[0]?.date ?? ''}`,
     );
+    const summary = screen.getByRole('region', { name: 'What is compared' });
+    expect(summary).toHaveTextContent('120'); // common observations
+    expect(summary).toHaveTextContent('history of BBB begins');
+    expect(summary).toHaveTextContent('Close');
+    // Like the stock page: the summary comes before the range selector.
+    const rangeGroup = screen.getByRole('group', { name: 'Time range' });
+    expect(
+      summary.compareDocumentPosition(rangeGroup) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     // The chart description names the basis and the common baseline date.
     expect(screen.getByText(/Index of close: each stock = 100 on/)).toHaveTextContent(
       bbb[0]?.date ?? '',

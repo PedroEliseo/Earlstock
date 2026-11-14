@@ -9,12 +9,13 @@ import { ApiError, describeError } from '../../api/errors';
 import { RangeControls } from '../../components/RangeControls';
 import { ErrorMessage, StatusMessage } from '../../components/StatusMessage';
 import { usePageTitle } from '../../components/usePageTitle';
-import type { PriceBasis } from '../../domain/comparison';
+import { coverageConstraints, type PriceBasis } from '../../domain/comparison';
 import type { RangeRequest } from '../../domain/ranges';
 import { visuallyHidden } from '../../theme/theme';
 import { ComparisonChartPanel } from './ComparisonChartPanel';
 import { StockNotFoundError } from './comparisonData';
 import { buildComparisonModel } from './comparisonModel';
+import { ComparisonSummary } from './ComparisonSummary';
 import { MIN_TICKERS, readCompareViewState, withCompareChanges } from './compareViewState';
 import { MetricsTable } from './MetricsTable';
 import { ObservationsTable } from './ObservationsTable';
@@ -131,6 +132,17 @@ export function ComparePage() {
               />
             ) : (
               <>
+                {model && (
+                  <ComparisonSummary
+                    range={result.range}
+                    dates={model.dates}
+                    basis={basis}
+                    {...coverageConstraints(
+                      result.stocks.map((s) => ({ ticker: s.ticker, coverage: s.detail.coverage })),
+                      result.common,
+                    )}
+                  />
+                )}
                 <Paper sx={{ p: 2 }}>
                   <Stack spacing={2}>
                     <RangeControls
