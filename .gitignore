@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+!.env.observability.example
 
 # Historical dataset: not committed until its source and redistribution licence are verified.
 data/

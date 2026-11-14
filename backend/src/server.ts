@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { createPool, poolStats } from './db/pool.js';
 import { logger, serializeError } from './shared/logger.js';
+import { shutdownTelemetry } from './shared/telemetry.js';
 
 const env = loadEnv();
 const pool = createPool(env);
@@ -33,6 +34,12 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   } catch (err) {
     logger.error('failed to close the database pool', { error: serializeError(err) });
     exitCode = 1;
+  }
+
+  // Last, so the spans of the final requests are flushed too. Bounded; never changes the exit code.
+  const telemetry = await shutdownTelemetry();
+  if (telemetry === 'failed' || telemetry === 'timed-out') {
+    logger.warn('telemetry was not fully flushed', { result: telemetry });
   }
 
   process.exit(exitCode);
