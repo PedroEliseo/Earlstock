@@ -1,5 +1,5 @@
 import { alpha, useColorScheme } from '@mui/material/styles';
-import { SCHEME_COLORS } from '../../../theme/theme';
+import { SCHEME_COLORS } from '../../theme/theme';
 
 export interface ChartColors {
   text: string;
@@ -8,6 +8,8 @@ export interface ChartColors {
   down: string;
   line: string;
   volume: string;
+  /** Categorical colors for compared series, by position. */
+  series: readonly string[];
 }
 
 /**
@@ -25,5 +27,6 @@ export function useChartColors(): ChartColors {
     down: colors.down,
     line: colors.primary,
     volume: alpha(colors.textSecondary, 0.35),
+    series: colors.series,
   };
 }

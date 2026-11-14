@@ -15,7 +15,7 @@ import type { RangeRequest } from '../../domain/ranges';
 import { visuallyHidden } from '../../theme/theme';
 import { ChartPanel } from './ChartPanel';
 import { PriceTable } from './PriceTable';
-import { RangeControls } from './RangeControls';
+import { RangeControls } from '../../components/RangeControls';
 import { StockHeader } from './StockHeader';
 import { type ChartType, type LineField, readDetailViewState, withViewChanges } from './stockView';
 import { useStockView } from './useStockView';

@@ -19,6 +19,12 @@ export const routes: RouteObject[] = [
           Component: (await import('./features/stock-detail/StockDetailPage')).StockDetailPage,
         }),
       },
+      {
+        path: 'compare',
+        lazy: async () => ({
+          Component: (await import('./features/comparison/ComparePage')).ComparePage,
+        }),
+      },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

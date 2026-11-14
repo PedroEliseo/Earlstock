@@ -22,6 +22,8 @@ export const SCHEME_COLORS = {
     divider: '#d4d7dd',
     up: '#1e7d43',
     down: '#c0362c',
+    /** Categorical colors for compared series (paired with distinct line styles). */
+    series: ['#0b5cad', '#c2410c', '#15803d', '#7e22ce', '#b4235a'],
   },
   dark: {
     primary: '#6cb4ff',
@@ -32,6 +34,7 @@ export const SCHEME_COLORS = {
     divider: '#343a43',
     up: '#4cc38a',
     down: '#ff7a6e',
+    series: ['#6cb4ff', '#fb923c', '#4ade80', '#c084fc', '#f472b6'],
   },
 } as const;
 export type ColorScheme = keyof typeof SCHEME_COLORS;

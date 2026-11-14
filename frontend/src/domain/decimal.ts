@@ -55,3 +55,27 @@ export function decimalPlaces(value: string): number {
   const dot = value.indexOf('.');
   return dot < 0 ? 0 : value.length - dot - 1;
 }
+
+/**
+ * A computed percentage (already × 100), two decimals, locale-aware. `signed` shows "+" for gains.
+ * These are derived values (not source data), so rounding for display is appropriate.
+ */
+export function formatPercent(
+  value: number,
+  { signed = false, locale }: { signed?: boolean; locale?: string } = {},
+): string {
+  return new Intl.NumberFormat(locale, {
+    style: 'percent',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    signDisplay: signed ? 'exceptZero' : 'auto',
+  }).format(value / 100);
+}
+
+/** An index value (start = 100), two decimals, locale-aware. */
+export function formatIndex(value: number, locale?: string): string {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}

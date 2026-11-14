@@ -104,3 +104,20 @@ export function stockServer(
     return jsonResponse({ data: page, page: { limit, nextAfter } }, { snapshot });
   };
 }
+
+/** One fake API for the stock list and per-stock endpoints (see stockListServer, stockServer). */
+export function fullServer(
+  stocks: Record<string, readonly Bar[]>,
+  snapshotFor: (call: number, url: URL) => number = () => 1,
+): FakeServer {
+  const summaries = Object.entries(stocks)
+    .map(([ticker, bars]) => ({
+      ticker,
+      firstDate: bars[0]?.date ?? '',
+      lastDate: bars.at(-1)?.date ?? '',
+    }))
+    .sort((a, b) => (a.ticker < b.ticker ? -1 : 1));
+  const list = stockListServer(summaries);
+  const detail = stockServer(stocks, snapshotFor);
+  return (url, init) => (url.pathname === '/api/stocks' ? list(url, init) : detail(url, init));
+}

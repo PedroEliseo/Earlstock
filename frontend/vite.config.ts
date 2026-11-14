@@ -33,14 +33,17 @@ export default defineConfig({
               priority: 3,
             },
             {
+              // MUI's runtime (styling engine, system, utilities). @mui/material components are
+              // NOT grouped: each lands with the routes that use it, so lazy routes' components
+              // stay out of the initial bundle.
               name: 'mui',
-              test: /node_modules[\\/](@mui|@emotion|@popperjs|stylis|react-transition-group)[\\/]/,
+              test: /node_modules[\\/](@mui[\\/](system|utils|styled-engine|private-theming|core-downloads-tracker)|@emotion|stylis|react-transition-group|@popperjs)[\\/]/,
               priority: 2,
             },
             {
               // The chart library stays out of the eager vendor chunk: it is loaded only with charts.
               name: 'vendor',
-              test: /node_modules[\\/](?!lightweight-charts|fancy-canvas)/,
+              test: /node_modules[\\/](?!lightweight-charts|fancy-canvas|@mui[\\/]material|@mui[\\/]icons-material)/,
               priority: 1,
             },
           ],

@@ -14,6 +14,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 /** Primary navigation; each feature adds its entry when it exists. */
 const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
   { to: '/', label: 'Explorer', end: true },
+  { to: '/compare', label: 'Compare' },
 ];
 
 /**

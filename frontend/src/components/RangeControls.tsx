@@ -16,7 +16,7 @@ import {
   type RangeRequest,
   type ResolvedRange,
   validateCustomRange,
-} from '../../domain/ranges';
+} from '../domain/ranges';
 
 const ERROR_TEXT: Record<CustomRangeError, string> = {
   'invalid-from': 'Enter a valid start date.',

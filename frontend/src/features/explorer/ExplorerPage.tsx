@@ -20,7 +20,7 @@ import {
   type SortKey,
   sortStocks,
 } from './stockListView';
-import { useStockList } from './useStockList';
+import { useStockList } from '../../query/useStockList';
 
 /**
  * Stock explorer. Server state (the complete list) comes from TanStack Query; the view state

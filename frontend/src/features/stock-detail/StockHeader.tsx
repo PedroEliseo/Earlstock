@@ -3,7 +3,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import type { StockDetail } from '../../api/schemas';
 import { formatDecimal, formatInteger } from '../../domain/decimal';
-import { ValueList } from './ValueList';
+import { ValueList } from '../../components/ValueList';
 
 /**
  * Ticker, historical coverage and the latest available bar. Only what the dataset provides is

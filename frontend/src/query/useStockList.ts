@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { loadConsistent } from '../../api/snapshot';
-import { loadStockList } from '../../api/stocks';
-import { useSnapshotCoordinator } from '../../query/SnapshotProvider';
+import { loadConsistent } from '../api/snapshot';
+import { loadStockList } from '../api/stocks';
+import { useSnapshotCoordinator } from './SnapshotProvider';
 
 export const stockListQueryKey = ['stocks', 'list'] as const;
 
