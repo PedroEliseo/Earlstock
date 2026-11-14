@@ -1,38 +1,33 @@
-import type { Pool } from 'pg';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
+import { createPool } from '../src/db/pool.js';
 import {
   createFixturePool,
   createTestPool,
   describeWithDatabase,
   truncateAll,
 } from './helpers/database.js';
+import {
+  activate,
+  type FixtureBar,
+  insertBars,
+  insertImport,
+  insertStock,
+  seedActiveDataset,
+} from './helpers/fixtures.js';
+import { testDatabaseUrls } from './setup/global-setup.js';
 
-const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const UNKNOWN_ID = '019a7d3c-8f2e-7a51-9c3b-2d4e6f8a0b1c';
-
-interface StockJson {
-  id: string;
-  ticker: string;
-  createdAt: string;
+interface ApiBar extends Omit<FixtureBar, 'volume'> {
+  volume: number;
 }
 
+const toApiBar = (bar: FixtureBar): ApiBar => ({ ...bar, volume: Number(bar.volume) });
 const tickersOf = (res: request.Response) =>
-  (res.body as { data: StockJson[] }).data.map((stock) => stock.ticker);
+  (res.body as { data: { ticker: string }[] }).data.map((stock) => stock.ticker);
 
-/** The API is read-only, so test data is inserted directly, as the owner role (as the importer will do). */
-async function insertStocks(pool: Pool, ...tickers: string[]): Promise<StockJson[]> {
-  const { rows } = await pool.query<StockJson>(
-    `INSERT INTO stocks (ticker) SELECT unnest($1::text[])
-     RETURNING id, ticker, created_at AS "createdAt"`,
-    [tickers],
-  );
-  return rows;
-}
-
-describeWithDatabase('stocks API (database)', () => {
-  const pool = createTestPool(); // API role, as in production
-  const fixtures = createFixturePool(); // owner role, for test data
+describeWithDatabase('stocks API (database, API role)', () => {
+  const pool = createTestPool(); // the application's role, as in production
+  const fixtures = createFixturePool(); // owner role: test data only
   const app = createApp({ pool });
 
   beforeEach(() => truncateAll(fixtures));
@@ -41,58 +36,286 @@ describeWithDatabase('stocks API (database)', () => {
     await fixtures.end();
   });
 
+  describe('without an active snapshot', () => {
+    it.each(['/api/stocks', '/api/stocks/AAPL', '/api/stocks/AAPL/prices'])(
+      'GET %s responds 503 DATASET_NOT_LOADED, without Retry-After, even when data exists',
+      async (path) => {
+        // A succeeded import with data that was never activated must not be served.
+        const importId = await insertImport(fixtures);
+        await insertBars(fixtures, {
+          stockId: await insertStock(fixtures, 'AAPL'),
+          importId,
+          days: 3,
+        });
+
+        const res = await request(app).get(path);
+
+        expect(res.status).toBe(503);
+        expect(res.headers['retry-after']).toBeUndefined();
+        expect(res.headers['dataset-snapshot']).toBeUndefined();
+        expect(res.body).toEqual({
+          error: { code: 'DATASET_NOT_LOADED', message: 'No dataset is loaded yet' },
+        });
+      },
+    );
+  });
+
   describe('GET /api/stocks', () => {
-    it('returns an empty page when there are no stocks', async () => {
+    it('distinguishes an active snapshot without stocks (200, empty) from no snapshot', async () => {
+      const importId = await insertImport(fixtures);
+      await activate(fixtures, importId);
+
       const res = await request(app).get('/api/stocks');
 
       expect(res.status).toBe(200);
+      expect(res.headers['dataset-snapshot']).toBe(String(importId));
       expect(res.body).toEqual({ data: [], pagination: { limit: 20, offset: 0, total: 0 } });
     });
 
-    it('paginates with limit and offset, ordered by ticker, with the total count', async () => {
-      await insertStocks(fixtures, 'MSFT', 'BRK.B', 'AAPL');
-
-      const first = await request(app).get('/api/stocks?limit=2&offset=0');
-      const second = await request(app).get('/api/stocks?limit=2&offset=2');
-      const beyond = await request(app).get('/api/stocks?limit=2&offset=10');
-
-      expect(first.status).toBe(200);
-      expect(tickersOf(first)).toEqual(['AAPL', 'BRK.B']);
-      expect(first.body.pagination).toEqual({ limit: 2, offset: 0, total: 3 });
-      expect(tickersOf(second)).toEqual(['MSFT']);
-      expect(beyond.body).toEqual({ data: [], pagination: { limit: 2, offset: 10, total: 3 } });
-    });
-
-    it('returns id, ticker and createdAt, with a database-generated UUIDv7', async () => {
-      await insertStocks(fixtures, 'AAPL');
+    it('lists stocks byte-wise by ticker with their date coverage and the snapshot header', async () => {
+      const { importId, bars } = await seedActiveDataset(fixtures, [
+        { ticker: 'BFA', days: 2 },
+        { ticker: 'BF.B', days: 3 },
+        { ticker: '^GSPC', days: 1 },
+        { ticker: 'B', days: 2, endOffset: -5 },
+      ]);
 
       const res = await request(app).get('/api/stocks');
 
-      expect((res.body as { data: StockJson[] }).data).toEqual([
-        { id: expect.stringMatching(UUID_V7), ticker: 'AAPL', createdAt: expect.any(String) },
-      ]);
+      expect(res.headers['dataset-snapshot']).toBe(String(importId));
+      expect((res.body as { data: unknown[] }).data).toEqual(
+        ['B', 'BF.B', 'BFA', '^GSPC'].map((ticker) => ({
+          ticker,
+          firstDate: bars[ticker]?.at(0)?.date,
+          lastDate: bars[ticker]?.at(-1)?.date,
+        })),
+      );
+    });
+
+    it('paginates with a total that stays consistent, including a page beyond the end', async () => {
+      await seedActiveDataset(
+        fixtures,
+        ['AA', 'BB', 'CC', 'DD', 'EE'].map((ticker) => ({ ticker, days: 1 })),
+      );
+
+      const pages = await Promise.all(
+        [0, 2, 4, 10].map((offset) =>
+          request(app).get(`/api/stocks?limit=2&offset=${String(offset)}`),
+        ),
+      );
+
+      expect(pages.map(tickersOf)).toEqual([['AA', 'BB'], ['CC', 'DD'], ['EE'], []]);
+      expect(
+        pages.map((res) => (res.body as { pagination: { total: number } }).pagination.total),
+      ).toEqual([5, 5, 5, 5]);
+    });
+
+    it('excludes stocks that have no bars in the active snapshot', async () => {
+      const { importId } = await seedActiveDataset(fixtures, [{ ticker: 'LIVE', days: 2 }]);
+      // Bars for OLD exist only in another (failed) import; ORPHAN has no bars at all.
+      const failed = await insertImport(fixtures, 'failed');
+      await insertBars(fixtures, {
+        stockId: await insertStock(fixtures, 'OLD'),
+        importId: failed,
+        days: 2,
+        endOffset: -100,
+      });
+      await insertStock(fixtures, 'ORPHAN');
+
+      const res = await request(app).get('/api/stocks');
+
+      expect(res.headers['dataset-snapshot']).toBe(String(importId));
+      expect(tickersOf(res)).toEqual(['LIVE']);
+      expect((res.body as { pagination: { total: number } }).pagination.total).toBe(1);
     });
   });
 
-  describe('GET /api/stocks/:id', () => {
-    it('returns an existing stock', async () => {
-      const [stock] = await insertStocks(fixtures, 'AAPL');
+  describe('GET /api/stocks/:ticker', () => {
+    it('returns coverage and the latest bar: prices as exact strings, volume as a number', async () => {
+      const { importId, bars } = await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 4 }]);
+      const aapl = bars['AAPL'] ?? [];
 
-      const res = await request(app).get(`/api/stocks/${String(stock?.id)}`);
+      const res = await request(app).get('/api/stocks/AAPL');
 
       expect(res.status).toBe(200);
-      expect(res.body.data).toEqual({
-        id: stock?.id,
-        ticker: 'AAPL',
-        createdAt: expect.any(String),
+      expect(res.headers['dataset-snapshot']).toBe(String(importId));
+      expect(res.body).toEqual({
+        data: {
+          ticker: 'AAPL',
+          coverage: { firstDate: aapl.at(0)?.date, lastDate: aapl.at(-1)?.date, tradingDays: 4 },
+          latest: toApiBar(aapl.at(-1) as FixtureBar),
+        },
+      });
+      const latest = (res.body as { data: { latest: ApiBar } }).data.latest;
+      expect(typeof latest.close).toBe('string');
+      expect(typeof latest.volume).toBe('number');
+    });
+
+    it.each([
+      ['lower case', '/api/stocks/brk.b', 'BRK.B'],
+      ['an index symbol (percent-encoded ^)', '/api/stocks/%5EGSPC', '^GSPC'],
+    ])('accepts %s', async (_case, path, ticker) => {
+      await seedActiveDataset(fixtures, [{ ticker, days: 1 }]);
+
+      const res = await request(app).get(path);
+
+      expect(res.status).toBe(200);
+      expect((res.body as { data: { ticker: string } }).data.ticker).toBe(ticker);
+    });
+
+    it('responds 404 NOT_FOUND for an unknown ticker and for one present only in an inactive import', async () => {
+      await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 1 }]);
+      const inactive = await insertImport(fixtures);
+      await insertBars(fixtures, {
+        stockId: await insertStock(fixtures, 'OLD'),
+        importId: inactive,
+        days: 2,
+      });
+
+      for (const ticker of ['NOPE', 'OLD']) {
+        const res = await request(app).get(`/api/stocks/${ticker}`);
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual({
+          error: { code: 'NOT_FOUND', message: `Stock ${ticker} not found` },
+        });
+      }
+    });
+  });
+
+  describe('GET /api/stocks/:ticker/prices', () => {
+    it('returns the full history oldest first by default', async () => {
+      const { bars } = await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 5 }]);
+
+      const res = await request(app).get('/api/stocks/AAPL/prices');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        data: (bars['AAPL'] ?? []).map(toApiBar),
+        page: { limit: 1000, nextAfter: null },
       });
     });
 
-    it('responds 404 for a nonexistent stock', async () => {
-      const res = await request(app).get(`/api/stocks/${UNKNOWN_ID}`);
+    it('treats from and to as inclusive bounds', async () => {
+      const { bars } = await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 5 }]);
+      const dates = (bars['AAPL'] ?? []).map((bar) => bar.date);
+
+      const res = await request(app).get(
+        `/api/stocks/AAPL/prices?from=${String(dates[1])}&to=${String(dates[3])}`,
+      );
+
+      expect((res.body as { data: ApiBar[] }).data.map((bar) => bar.date)).toEqual(
+        dates.slice(1, 4),
+      );
+    });
+
+    it('pages deterministically with an exclusive cursor until nextAfter is null', async () => {
+      const { bars } = await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 7 }]);
+      const dates = (bars['AAPL'] ?? []).map((bar) => bar.date);
+      const from = String(dates[1]);
+      const to = String(dates[6]);
+
+      const seen: string[] = [];
+      const cursors: (string | null)[] = [];
+      let after: string | null = null;
+      do {
+        const query: string = `from=${from}&to=${to}&limit=2${after ? `&after=${after}` : ''}`;
+        const res = await request(app).get(`/api/stocks/AAPL/prices?${query}`);
+        const page = res.body as { data: ApiBar[]; page: { nextAfter: string | null } };
+        seen.push(...page.data.map((bar) => bar.date));
+        after = page.page.nextAfter;
+        cursors.push(after);
+        if (after) expect(page.data.at(-1)?.date).toBe(after); // cursor = last returned date
+      } while (after);
+
+      expect(seen).toEqual(dates.slice(1, 7)); // every bar exactly once, in order
+      expect(cursors).toEqual([dates[2], dates[4], null]);
+    });
+
+    it('returns an empty page (200) for a known stock with no bars in the range', async () => {
+      const { bars } = await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 2 }]);
+      const last = String(bars['AAPL']?.at(-1)?.date);
+
+      const res = await request(app).get(`/api/stocks/AAPL/prices?after=${last}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ data: [], page: { limit: 1000, nextAfter: null } });
+    });
+
+    it('never returns bars of a failed or inactive import, even for the same stock', async () => {
+      const { bars } = await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 2 }]);
+      const stockId = await insertStock(fixtures, 'AAPL');
+      const failed = await insertImport(fixtures, 'failed');
+      const inactive = await insertImport(fixtures);
+      await insertBars(fixtures, { stockId, importId: failed, days: 3, endOffset: -10, base: 500 });
+      await insertBars(fixtures, {
+        stockId,
+        importId: inactive,
+        days: 3,
+        endOffset: -20,
+        base: 700,
+      });
+
+      const res = await request(app).get('/api/stocks/AAPL/prices');
+
+      expect((res.body as { data: ApiBar[] }).data).toEqual((bars['AAPL'] ?? []).map(toApiBar));
+    });
+
+    it('responds 404 for an unknown ticker', async () => {
+      await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 1 }]);
+
+      const res = await request(app).get('/api/stocks/NOPE/prices');
 
       expect(res.status).toBe(404);
-      expect(res.body).toEqual({ error: { message: `Stock ${UNKNOWN_ID} not found` } });
+      expect((res.body as { error: { code: string } }).error.code).toBe('NOT_FOUND');
+    });
+  });
+
+  describe('value representation', () => {
+    it('preserves exact decimals and the largest volume, trimming only trailing zeros', async () => {
+      const importId = await insertImport(fixtures);
+      const stockId = await insertStock(fixtures, 'EXACT');
+      await fixtures.query(
+        `INSERT INTO daily_prices (stock_id, trade_date, open, high, low, close, adj_close, volume, import_id)
+         VALUES ($1, current_date, '0.000001', '999999999999.999999', '0.000001', '243.850000', '1.100000',
+                 9007199254740991, $2)`,
+        [stockId, importId],
+      );
+      await activate(fixtures, importId);
+
+      const res = await request(app).get('/api/stocks/EXACT/prices');
+
+      expect(res.text).toContain('"volume":9007199254740991');
+      expect((res.body as { data: ApiBar[] }).data[0]).toMatchObject({
+        open: '0.000001',
+        high: '999999999999.999999',
+        close: '243.85',
+        adjClose: '1.1',
+        volume: 9007199254740991,
+      });
+    });
+
+    it('returns the same dates whatever the session TimeZone and DateStyle', async () => {
+      const { bars } = await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 3 }]);
+      const settings = encodeURIComponent('-c TimeZone=Pacific/Kiritimati -c DateStyle=SQL,DMY');
+      const url = `${testDatabaseUrls()?.api ?? ''}?options=${settings}`;
+      const exotic = createPool({ MARKET_DATA_DATABASE_URL: url, DATABASE_POOL_MAX: 1 });
+      const westernmost = createPool({
+        MARKET_DATA_DATABASE_URL: `${testDatabaseUrls()?.api ?? ''}?options=${encodeURIComponent('-c TimeZone=Etc/GMT+12')}`,
+        DATABASE_POOL_MAX: 1,
+      });
+      try {
+        const expected = {
+          data: (bars['AAPL'] ?? []).map(toApiBar),
+          page: { limit: 1000, nextAfter: null },
+        };
+        for (const custom of [exotic, westernmost]) {
+          const res = await request(createApp({ pool: custom })).get('/api/stocks/AAPL/prices');
+          expect(res.body).toEqual(expected);
+        }
+      } finally {
+        await exotic.end();
+        await westernmost.end();
+      }
     });
   });
 });

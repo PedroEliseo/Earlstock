@@ -1,7 +1,8 @@
 import type { Request, RequestHandler, Response } from 'express';
+import type { ReadinessReport } from './health.service.js';
 
 export interface HealthDependencies {
-  checkDatabase: () => Promise<boolean>;
+  checkReadiness: () => Promise<ReadinessReport>;
 }
 
 /** Liveness: the process is up and serving HTTP. Deliberately independent of the database. */
@@ -13,13 +14,10 @@ export function getHealth(_req: Request, res: Response): void {
   });
 }
 
-/** Readiness: the service can do useful work, i.e. its dependencies are reachable. */
-export function getReadiness({ checkDatabase }: HealthDependencies): RequestHandler {
+/** Readiness: the service can do useful work (see createReadinessCheck). */
+export function getReadiness({ checkReadiness }: HealthDependencies): RequestHandler {
   return async (_req, res) => {
-    const databaseUp = await checkDatabase();
-    res.status(databaseUp ? 200 : 503).json({
-      status: databaseUp ? 'ok' : 'unavailable',
-      checks: { database: databaseUp ? 'up' : 'down' },
-    });
+    const { ready, checks } = await checkReadiness();
+    res.status(ready ? 200 : 503).json({ status: ready ? 'ok' : 'unavailable', checks });
   };
 }

@@ -10,6 +10,7 @@ describe('loadEnv', () => {
       PORT: 3000,
       MARKET_DATA_DATABASE_URL,
       DATABASE_POOL_MAX: 10,
+      DATABASE_STATEMENT_TIMEOUT_MS: 5000,
     });
   });
 
@@ -59,5 +60,15 @@ describe('loadEnv', () => {
 
     expect(env).not.toHaveProperty('MARKET_DATA_PROVIDER');
     expect(env).not.toHaveProperty('EODHD_DAILY_CALL_BUDGET');
+  });
+
+  it('validates the API statement timeout', () => {
+    expect(
+      loadEnv({ MARKET_DATA_DATABASE_URL, DATABASE_STATEMENT_TIMEOUT_MS: '250' })
+        .DATABASE_STATEMENT_TIMEOUT_MS,
+    ).toBe(250);
+    expect(() =>
+      loadEnv({ MARKET_DATA_DATABASE_URL, DATABASE_STATEMENT_TIMEOUT_MS: '50' }),
+    ).toThrow(/DATABASE_STATEMENT_TIMEOUT_MS/);
   });
 });

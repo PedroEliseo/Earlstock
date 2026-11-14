@@ -1,18 +1,19 @@
 import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
-import { createPool } from './db/pool.js';
+import { createPool, poolStats } from './db/pool.js';
+import { logger, serializeError } from './shared/logger.js';
 
 const env = loadEnv();
 const pool = createPool(env);
 const app = createApp({ pool });
 
 const server = app.listen(env.PORT, () => {
-  console.log(`EarlStock API listening on port ${String(env.PORT)} (${env.NODE_ENV})`);
+  logger.info('EarlStock API listening', { port: env.PORT, environment: env.NODE_ENV });
 });
 
 /** Stop accepting HTTP traffic, let in-flight requests finish, then release DB connections. */
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
-  console.log(`${signal} received, shutting down`);
+  logger.info('shutting down', { signal, pool: poolStats(pool) });
   let exitCode = 0;
 
   try {
@@ -23,14 +24,14 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
       });
     });
   } catch (err) {
-    console.error(err);
+    logger.error('failed to close the HTTP server', { error: serializeError(err) });
     exitCode = 1;
   }
 
   try {
     await pool.end();
   } catch (err) {
-    console.error(err);
+    logger.error('failed to close the database pool', { error: serializeError(err) });
     exitCode = 1;
   }
 

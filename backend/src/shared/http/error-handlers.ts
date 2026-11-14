@@ -1,60 +1,109 @@
 import type { NextFunction, Request, Response } from 'express';
-import { isPgError, PgErrorCode } from '../../db/errors.js';
-import { ConflictError, NotFoundError, ValidationError, type ValidationIssue } from '../errors.js';
+import {
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+  DatasetNotLoadedError,
+  NotFoundError,
+  ValidationError,
+  type ValidationIssue,
+} from '../errors.js';
+import { logger as defaultLogger, type Logger, serializeError } from '../logger.js';
+
+/** Machine-readable error codes; part of the API contract. */
+export type ErrorCode =
+  | 'VALIDATION_FAILED'
+  | 'BAD_REQUEST'
+  | 'NOT_FOUND'
+  | 'DATASET_NOT_LOADED'
+  | 'DATABASE_UNAVAILABLE'
+  | 'DATABASE_TIMEOUT'
+  | 'INTERNAL';
 
 interface ErrorBody {
+  code: ErrorCode;
   message: string;
   details?: ValidationIssue[];
 }
 
+interface ErrorResponse {
+  status: number;
+  body: ErrorBody;
+  /** Seconds; set only where retrying the same request later is expected to succeed. */
+  retryAfterSeconds?: number;
+}
+
+/** A short outage (restart, failover, exhausted pool) usually clears within seconds. */
+const DATABASE_RETRY_AFTER_SECONDS = 5;
+
 export function notFoundHandler(req: Request, res: Response): void {
-  res.status(404).json({ error: { message: `Route ${req.method} ${req.path} not found` } });
+  res
+    .status(404)
+    .json({ error: { code: 'NOT_FOUND', message: `Route ${req.method} ${req.path} not found` } });
 }
 
 /**
- * Central error handler: the single place where errors become HTTP responses, so every
- * endpoint returns the same `{ error: { message, details? } }` shape.
+ * Central error handler: the single place where errors become HTTP responses, so every endpoint
+ * returns `{ error: { code, message, details? } }`. Responses never contain SQL, parameters,
+ * credentials or PostgreSQL details; the original error (with its cause chain) is logged instead.
  * Express identifies error middleware by its 4-argument signature, so `_next` must stay.
  */
-export function errorHandler(
-  err: unknown,
-  _req: Request,
-  res: Response,
-  _next: NextFunction,
-): void {
-  const [status, body] = toErrorResponse(err);
-  if (status >= 500) console.error(err);
-  res.status(status).json({ error: body });
+export function createErrorHandler(logger: Logger = defaultLogger) {
+  return (err: unknown, req: Request, res: Response, _next: NextFunction): void => {
+    const { status, body, retryAfterSeconds } = toErrorResponse(err);
+    if (status >= 500) {
+      const fields = {
+        code: body.code,
+        status,
+        method: req.method,
+        path: req.path,
+        error: serializeError(err),
+      };
+      // An empty dataset is an expected operational state, not a fault.
+      if (body.code === 'DATASET_NOT_LOADED') logger.warn('request failed', fields);
+      else logger.error('request failed', fields);
+    }
+    if (retryAfterSeconds !== undefined) res.set('Retry-After', String(retryAfterSeconds));
+    res.status(status).json({ error: body });
+  };
 }
 
-function toErrorResponse(err: unknown): [number, ErrorBody] {
-  if (err instanceof ValidationError) return [400, { message: err.message, details: err.issues }];
-  if (err instanceof NotFoundError) return [404, { message: err.message }];
-  if (err instanceof ConflictError) return [409, { message: err.message }];
-
-  // Fallback for constraint violations a service did not translate into a domain error.
-  // The raw PostgreSQL message is never sent: it can leak schema details and key values.
-  if (isPgError(err, PgErrorCode.UniqueViolation)) {
-    return [409, { message: 'Resource already exists' }];
+function toErrorResponse(err: unknown): ErrorResponse {
+  if (err instanceof ValidationError) {
+    return {
+      status: 400,
+      body: { code: 'VALIDATION_FAILED', message: err.message, details: err.issues },
+    };
   }
-  if (isPgError(err, PgErrorCode.ForeignKeyViolation)) {
-    return [409, { message: 'Operation conflicts with related resources' }];
+  if (err instanceof NotFoundError) {
+    return { status: 404, body: { code: 'NOT_FOUND', message: err.message } };
   }
-
-  // Client errors raised by Express middleware, e.g. malformed JSON (400) or payload too large (413).
-  if (isExposedClientError(err)) return [err.status, { message: err.message }];
-
-  return [500, { message: 'Internal Server Error' }];
+  if (err instanceof DatasetNotLoadedError) {
+    return { status: 503, body: { code: 'DATASET_NOT_LOADED', message: err.message } };
+  }
+  if (err instanceof DatabaseUnavailableError) {
+    return {
+      status: 503,
+      body: { code: 'DATABASE_UNAVAILABLE', message: err.message },
+      retryAfterSeconds: DATABASE_RETRY_AFTER_SECONDS,
+    };
+  }
+  if (err instanceof DatabaseTimeoutError) {
+    // No Retry-After: the same query is likely to time out again.
+    return { status: 503, body: { code: 'DATABASE_TIMEOUT', message: err.message } };
+  }
+  // Client errors raised by Express itself, e.g. a malformed percent-encoded path. The original
+  // message may echo the input, so a generic one is returned.
+  const clientStatus = clientErrorStatus(err);
+  if (clientStatus !== undefined) {
+    return { status: clientStatus, body: { code: 'BAD_REQUEST', message: 'Malformed request' } };
+  }
+  // DatabaseQueryError (any other database failure) and anything unexpected: never expose details.
+  return { status: 500, body: { code: 'INTERNAL', message: 'Internal Server Error' } };
 }
 
-function isExposedClientError(err: unknown): err is { status: number; message: string } {
-  return (
-    err instanceof Error &&
-    'expose' in err &&
-    err.expose === true &&
-    'status' in err &&
-    typeof err.status === 'number' &&
-    err.status >= 400 &&
-    err.status < 500
-  );
+/** A 4xx `status` set by Express or its router (duck-typed: such errors may come from another realm). */
+function clientErrorStatus(err: unknown): number | undefined {
+  const status =
+    typeof err === 'object' && err !== null && 'status' in err ? err.status : undefined;
+  return typeof status === 'number' && status >= 400 && status < 500 ? status : undefined;
 }

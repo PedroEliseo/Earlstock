@@ -62,7 +62,13 @@ describeWithDatabase('migrations (disposable database)', () => {
 
   it('applies, reverts to zero and re-applies the full chain', async () => {
     await migrate(url, 'up', MIGRATIONS.length);
-    expect(await tables()).toEqual(['daily_prices', 'data_imports', 'pgmigrations', 'stocks']);
+    expect(await tables()).toEqual([
+      'daily_prices',
+      'data_imports',
+      'dataset_snapshot',
+      'pgmigrations',
+      'stocks',
+    ]);
 
     await migrate(url, 'down', MIGRATIONS.length);
     expect(await tables()).toEqual(['pgmigrations']);

@@ -31,7 +31,10 @@ describe('health endpoints', () => {
       const res = await request(app).get('/health/ready');
 
       expect(res.status).toBe(503);
-      expect(res.body).toEqual({ status: 'unavailable', checks: { database: 'down' } });
+      expect(res.body).toEqual({
+        status: 'unavailable',
+        checks: { database: 'down', dataset: 'unknown', privileges: 'unknown' },
+      });
     });
   });
 

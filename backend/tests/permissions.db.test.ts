@@ -17,10 +17,13 @@ import { roleOf, testDatabaseUrls } from './setup/global-setup.js';
  */
 const SQLSTATE = { insufficientPrivilege: '42501', readOnlyTransaction: '25006' } as const;
 const DATA_TABLES = ['daily_prices', 'data_imports', 'stocks'];
+/** Everything the API role may read: the data tables plus the active-snapshot pointer. */
+const READABLE_TABLES = ['daily_prices', 'data_imports', 'dataset_snapshot', 'stocks'];
 /** A real column of each data table, for UPDATE statements. */
 const SOME_COLUMN: Record<string, string> = {
   daily_prices: 'volume',
   data_imports: 'status',
+  dataset_snapshot: 'activated_at',
   stocks: 'ticker',
 };
 const writesTo = (table: string) => [
@@ -60,6 +63,7 @@ describeWithDatabase('database permissions', () => {
       `INSERT INTO daily_prices (stock_id, trade_date, open, high, low, close, adj_close, volume, import_id)
        SELECT s.id, current_date, 10, 12, 9, 11, 10.5, 1000, i.id FROM stocks s, data_imports i`,
     );
+    await fixtures.query('INSERT INTO dataset_snapshot (import_id) SELECT id FROM data_imports');
   });
   afterAll(async () => {
     await truncateAll(fixtures);
@@ -109,7 +113,7 @@ describeWithDatabase('database permissions', () => {
       expect(rows[0]?.n).toBe(1);
     });
 
-    it('can read exactly the three data tables and nothing else in the schema', async () => {
+    it('can read exactly the data tables and the snapshot pointer, nothing else in the schema', async () => {
       const { rows } = await api.query<{ name: string }>(
         `SELECT c.relname AS name FROM pg_class c
          WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
@@ -117,10 +121,10 @@ describeWithDatabase('database permissions', () => {
                 OR (c.relkind = 'S' AND has_sequence_privilege(current_user, c.oid, 'USAGE')))
          ORDER BY 1`,
       );
-      expect(rows.map((row) => row.name)).toEqual(DATA_TABLES);
+      expect(rows.map((row) => row.name)).toEqual(READABLE_TABLES);
     });
 
-    it.each(DATA_TABLES.flatMap(writesTo))('cannot write: %s', async (statement) => {
+    it.each(READABLE_TABLES.flatMap(writesTo))('cannot write: %s', async (statement) => {
       // With read-only on, PostgreSQL may report either the read-only state or the missing privilege.
       expect([SQLSTATE.readOnlyTransaction, SQLSTATE.insufficientPrivilege]).toContain(
         await sqlstateOf(api.query(statement)),
@@ -128,7 +132,7 @@ describeWithDatabase('database permissions', () => {
     });
 
     it('still cannot write after switching read-only off: the grants are the real barrier', async () => {
-      const writes = DATA_TABLES.flatMap(writesTo);
+      const writes = READABLE_TABLES.flatMap(writesTo);
 
       expect(await asApiWithReadOnlyOff(...writes)).toEqual(
         writes.map(() => SQLSTATE.insufficientPrivilege),
@@ -239,7 +243,10 @@ describeWithDatabase('database permissions', () => {
       const stocks = await request(app).get('/api/stocks');
 
       expect(ready.status).toBe(200);
-      expect(ready.body).toEqual({ status: 'ok', checks: { database: 'up' } });
+      expect(ready.body).toEqual({
+        status: 'ok',
+        checks: { database: 'up', dataset: 'loaded', privileges: 'ok' },
+      });
       expect(stocks.status).toBe(200);
       expect((stocks.body as { data: { ticker: string }[] }).data.map((s) => s.ticker)).toEqual([
         'AAPL',

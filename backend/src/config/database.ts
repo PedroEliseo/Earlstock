@@ -12,6 +12,11 @@ export const databaseEnvSchema = z.object({
     error: 'must be a postgres:// URL for the read-only API role',
   }),
   DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+  /**
+   * Per-statement time limit for the API pool only (PostgreSQL statement_timeout). Other
+   * connections, such as the future importer's, configure their own limits.
+   */
+  DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
 });
 
 export type DatabaseEnv = z.infer<typeof databaseEnvSchema>;
