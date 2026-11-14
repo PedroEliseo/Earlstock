@@ -28,10 +28,7 @@ export function stubFetch(server: FakeServer) {
   const spy = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const signal = init?.signal;
     if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
-    const url = new URL(
-      input instanceof Request ? input.url : input.toString(),
-      'http://localhost',
-    );
+    const url = requestUrl(input);
     return new Promise<Response>((resolve, reject) => {
       signal?.addEventListener('abort', () => {
         reject(new DOMException('Aborted', 'AbortError'));
@@ -50,4 +47,9 @@ export function deferred<T>() {
     resolve = r;
   });
   return { promise, resolve };
+}
+
+/** The URL a fetch call was made with (for inspecting `spy.mock.calls`). */
+export function requestUrl(input: RequestInfo | URL): URL {
+  return new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost');
 }

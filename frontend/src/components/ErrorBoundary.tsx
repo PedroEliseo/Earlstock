@@ -1,3 +1,4 @@
+import Button from '@mui/material/Button';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { StatusMessage } from './StatusMessage';
 
@@ -27,7 +28,11 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBound
         kind="error"
         title="Something went wrong"
         description="This page could not be displayed. Reload the page or go back to the explorer."
-        action={<a href="/">Back to the explorer</a>}
+        action={
+          <Button color="inherit" size="small" variant="outlined" href="/">
+            Explorer
+          </Button>
+        }
       />
     );
   }

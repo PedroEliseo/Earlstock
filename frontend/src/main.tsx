@@ -1,13 +1,18 @@
+import CssBaseline from '@mui/material/CssBaseline';
+import { ThemeProvider } from '@mui/material/styles';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import './styles/global.css';
+import { theme } from './theme/theme';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('missing #root element');
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <ThemeProvider theme={theme} defaultMode="system">
+      <CssBaseline enableColorScheme />
+      <App />
+    </ThemeProvider>
   </StrictMode>,
 );

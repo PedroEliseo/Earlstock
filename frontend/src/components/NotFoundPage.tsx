@@ -1,24 +1,31 @@
-import { Link } from 'react-router';
+import Button from '@mui/material/Button';
+import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
+import { Link as RouterLink } from 'react-router';
 import { StatusMessage } from './StatusMessage';
 import { usePageTitle } from './usePageTitle';
 
 export function NotFoundPage({
   title = 'Page not found',
-  description,
+  description = 'There is nothing at this address.',
 }: {
   title?: string;
   description?: string;
 }) {
   usePageTitle(title);
   return (
-    <>
-      <h1>{title}</h1>
+    <Stack spacing={2}>
+      <Typography variant="h1">{title}</Typography>
       <StatusMessage
         kind="info"
         title={title}
-        description={description ?? 'There is nothing at this address.'}
-        action={<Link to="/">Go to the explorer</Link>}
+        description={description}
+        action={
+          <Button component={RouterLink} to="/" color="inherit" size="small" variant="outlined">
+            Explorer
+          </Button>
+        }
       />
-    </>
+    </Stack>
   );
 }

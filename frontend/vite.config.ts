@@ -19,9 +19,29 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
-    // Baseline (React, router, TanStack Query, zod/mini) is about 345 kB minified / 108 kB gzipped.
-    // Warn if any chunk grows beyond that noticeably; the chart library gets its own lazy chunk.
+    // Warn if any single chunk grows unexpectedly; the chart library gets its own lazy chunk.
     chunkSizeWarningLimit: 400,
+    rolldownOptions: {
+      output: {
+        // Long-lived vendor chunks: application changes do not invalidate the cached framework and
+        // design-system code, which change only on dependency upgrades.
+        codeSplitting: {
+          groups: [
+            {
+              name: 'react',
+              test: /node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/,
+              priority: 3,
+            },
+            {
+              name: 'mui',
+              test: /node_modules[\\/](@mui|@emotion|@popperjs|stylis|react-transition-group)[\\/]/,
+              priority: 2,
+            },
+            { name: 'vendor', test: /node_modules[\\/]/, priority: 1 },
+          ],
+        },
+      },
+    },
   },
   test: {
     environment: 'jsdom',

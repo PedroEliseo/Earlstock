@@ -1,7 +1,7 @@
 import type { RouteObject } from 'react-router';
 import { Layout } from './components/Layout';
 import { NotFoundPage } from './components/NotFoundPage';
-import { StatusMessage } from './components/StatusMessage';
+import { ExplorerPage } from './features/explorer/ExplorerPage';
 
 /**
  * Route table. Feature pages are added by their own steps (and lazy-loaded when they pull in heavy
@@ -11,16 +11,7 @@ export const routes: RouteObject[] = [
   {
     element: <Layout />,
     children: [
-      {
-        index: true,
-        element: (
-          <StatusMessage
-            kind="info"
-            title="EarlStock"
-            description="The stock explorer is being built."
-          />
-        ),
-      },
+      { index: true, element: <ExplorerPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

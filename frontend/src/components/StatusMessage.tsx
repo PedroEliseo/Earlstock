@@ -1,28 +1,33 @@
+import Alert from '@mui/material/Alert';
+import AlertTitle from '@mui/material/AlertTitle';
+import Button from '@mui/material/Button';
 import type { ReactNode } from 'react';
 import { describeError } from '../api/errors';
-import styles from './StatusMessage.module.css';
 
 interface StatusMessageProps {
-  kind: 'empty' | 'error' | 'info';
+  kind: 'empty' | 'error' | 'info' | 'warning';
   title: string;
   description?: string;
   action?: ReactNode;
 }
 
+const SEVERITY = { empty: 'info', info: 'info', warning: 'warning', error: 'error' } as const;
+
 /**
- * A short, self-contained message for empty, informational and error states. Errors use
- * role="alert" so assistive technology announces them; the others are polite status messages.
+ * A short, self-contained message for empty, informational and error states. Errors are announced
+ * as alerts; the others are polite status messages.
  */
 export function StatusMessage({ kind, title, description, action }: StatusMessageProps) {
   return (
-    <div
+    <Alert
+      severity={SEVERITY[kind]}
       role={kind === 'error' ? 'alert' : 'status'}
-      className={kind === 'error' ? `${styles.status} ${styles.error}` : styles.status}
+      action={action}
+      sx={{ alignItems: 'flex-start' }}
     >
-      <p className={styles.title}>{title}</p>
-      {description && <p className={styles.description}>{description}</p>}
-      {action && <div className={styles.action}>{action}</div>}
-    </div>
+      <AlertTitle sx={{ mb: description ? 0.5 : 0 }}>{title}</AlertTitle>
+      {description}
+    </Alert>
   );
 }
 
@@ -36,9 +41,9 @@ export function ErrorMessage({ error, onRetry }: { error: unknown; onRetry?: () 
       description={description}
       action={
         retryable && onRetry ? (
-          <button type="button" className={styles.button} onClick={onRetry}>
+          <Button color="inherit" size="small" variant="outlined" onClick={onRetry}>
             Try again
-          </button>
+          </Button>
         ) : undefined
       }
     />
