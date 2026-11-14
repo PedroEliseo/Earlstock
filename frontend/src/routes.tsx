@@ -12,6 +12,13 @@ export const routes: RouteObject[] = [
     element: <Layout />,
     children: [
       { index: true, element: <ExplorerPage /> },
+      {
+        // Lazy: the detail page (and, inside it, the chart library) is not part of the Explorer bundle.
+        path: 'stocks/:ticker',
+        lazy: async () => ({
+          Component: (await import('./features/stock-detail/StockDetailPage')).StockDetailPage,
+        }),
+      },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

@@ -37,7 +37,12 @@ export default defineConfig({
               test: /node_modules[\\/](@mui|@emotion|@popperjs|stylis|react-transition-group)[\\/]/,
               priority: 2,
             },
-            { name: 'vendor', test: /node_modules[\\/]/, priority: 1 },
+            {
+              // The chart library stays out of the eager vendor chunk: it is loaded only with charts.
+              name: 'vendor',
+              test: /node_modules[\\/](?!lightweight-charts|fancy-canvas)/,
+              priority: 1,
+            },
           ],
         },
       },

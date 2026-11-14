@@ -8,25 +8,51 @@ import { createTheme, type SxProps, type Theme } from '@mui/material/styles';
  * Visual language: restrained, data-first. Neutral surfaces, one accent, tabular figures for all
  * numbers and dates, visible keyboard focus, no decorative motion when reduced motion is requested.
  */
+/**
+ * Palette values per color scheme: the single source for the MUI theme below and for the canvas
+ * chart (which cannot read CSS variables). `up`/`down` are the price-direction colors.
+ */
+export const SCHEME_COLORS = {
+  light: {
+    primary: '#0b5cad',
+    background: '#f6f7f9',
+    paper: '#ffffff',
+    text: '#1b1f24',
+    textSecondary: '#545b66',
+    divider: '#d4d7dd',
+    up: '#1e7d43',
+    down: '#c0362c',
+  },
+  dark: {
+    primary: '#6cb4ff',
+    background: '#0f1216',
+    paper: '#171b21',
+    text: '#e8eaed',
+    textSecondary: '#a9b0ba',
+    divider: '#343a43',
+    up: '#4cc38a',
+    down: '#ff7a6e',
+  },
+} as const;
+export type ColorScheme = keyof typeof SCHEME_COLORS;
+
+const paletteFor = (scheme: ColorScheme) => {
+  const c = SCHEME_COLORS[scheme];
+  return {
+    primary: { main: c.primary },
+    success: { main: c.up },
+    error: { main: c.down },
+    background: { default: c.background, paper: c.paper },
+    text: { primary: c.text, secondary: c.textSecondary },
+    divider: c.divider,
+  };
+};
+
 export const theme = createTheme({
   cssVariables: { colorSchemeSelector: 'data' },
   colorSchemes: {
-    light: {
-      palette: {
-        primary: { main: '#0b5cad' },
-        background: { default: '#f6f7f9', paper: '#ffffff' },
-        text: { primary: '#1b1f24', secondary: '#545b66' },
-        divider: '#d4d7dd',
-      },
-    },
-    dark: {
-      palette: {
-        primary: { main: '#6cb4ff' },
-        background: { default: '#0f1216', paper: '#171b21' },
-        text: { primary: '#e8eaed', secondary: '#a9b0ba' },
-        divider: '#343a43',
-      },
-    },
+    light: { palette: paletteFor('light') },
+    dark: { palette: paletteFor('dark') },
   },
   shape: { borderRadius: 6 },
   typography: {
