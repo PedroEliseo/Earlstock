@@ -16,10 +16,15 @@ live prices and no external market-data services. EarlStock is not a trading or 
 
 ## Features
 
-- **Explorer** (`/`): every stock of the active dataset with its name, ticker and first and last
-  available date. Case-insensitive search by name or ticker, sorting by ticker or date, pages of 50; search, sort and page live
-  in the URL. The API searches, sorts and pages, so each view is a single request for the 50 rows
-  shown.
+- **Explorer** (`/`): every stock of the active dataset as a grid of cards (logo, ticker, name and
+  the period with daily prices). Case-insensitive search by name or ticker and a sort menu (ticker,
+  length of history, recency of data), both kept in the URL. More stocks load as you scroll (a
+  "Show more stocks" button does the same): the API searches, sorts and pages, so each step is one
+  request for 50 stocks, and pages are only combined within one dataset snapshot.
+  - **Logos** come from [logoapi.sh](https://logoapi.sh/) (free, no key), loaded directly by the
+    browser, so that service sees which tickers are displayed. Where it has no logo for a ticker, a
+    neutral monogram of the ticker is shown; some tickers are answered with a name tile generated
+    by the service, which the browser cannot distinguish from a logo.
 - **Stock detail** (`/stocks/:ticker`): the stock's name and ticker, coverage, the latest daily bar, range presets (1M, 3M, 6M,
   YTD, 1Y, 3Y, 5Y, MAX) anchored to the stock's **last available date** (never today's date), a
   custom range, a candlestick or line chart (close or adjusted close) with volume, and a paged table

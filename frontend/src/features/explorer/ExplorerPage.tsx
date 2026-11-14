@@ -3,7 +3,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import InputAdornment from '@mui/material/InputAdornment';
 import LinearProgress from '@mui/material/LinearProgress';
-import Pagination from '@mui/material/Pagination';
+import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -12,29 +12,37 @@ import { useSearchParams } from 'react-router';
 import { ApiError, describeError } from '../../api/errors';
 import { ErrorMessage, StatusMessage } from '../../components/StatusMessage';
 import { usePageTitle } from '../../components/usePageTitle';
-import { StockTable } from './StockTable';
-import { DEFAULT_SORT, PAGE_SIZE, pageCount, readViewState, type SortKey } from './stockListView';
-import { useStockPage } from './useStockPage';
+import { visuallyHidden } from '../../theme/theme';
+import { StockGrid, StockGridSkeleton } from './StockGrid';
+import { DEFAULT_SORT, readViewState, SORT_OPTIONS } from './stockListView';
+import { useStockPages } from './useStockPages';
 
 /** Typing pauses this long before a search request is sent. */
 const SEARCH_DEBOUNCE_MS = 300;
+/** Start loading the next page this far before the end of the list comes into view. */
+const PREFETCH_MARGIN = '600px';
 
 /**
- * Stock explorer. The view state (search, sort, page) lives in the URL, so every view can be
- * shared and survives reloads; the API searches, orders and pages the list, so each view costs one
- * request for the rows actually shown. The previous rows stay visible while the next view loads.
+ * Stock explorer: a grid of stock cards that loads more stocks as the user scrolls. The view state
+ * (search, order) lives in the URL; the API searches, orders and pages the list, so each step is one
+ * request for 50 stocks. The previous results stay visible while a new search or order loads.
  */
 export function ExplorerPage() {
   usePageTitle('Explorer');
   const [params, setParams] = useSearchParams();
-  const { query, sortKey, sortDirection, page } = readViewState(params);
-  const result = useStockPage({ query, sortKey, sortDirection, page });
-  const searchTerm = query;
+  const { query, sortKey, sortDirection } = readViewState(params);
+  const list = useStockPages({ query, sortKey, sortDirection });
+  const pages = list.data?.pages ?? [];
+  const stocks = pages.flatMap((page) => page.data.data);
+  const total = pages[0]?.data.pagination.total ?? 0;
+  const loaded = list.data !== undefined;
+  const refreshing = list.isPlaceholderData && list.isFetching;
+  const searching = query.trim() !== '';
 
   // The search box has its own state. Each keystroke restarts one timer; when typing pauses, the
-  // timer writes the typed term to the URL and returns to page 1 (one history replacement, one
-  // request). When the URL changes by other means (back, forward, "Clear search"), the box follows
-  // it and any pending update is cancelled, so a stale term can never be written back.
+  // timer writes the typed term to the URL (one history replacement, one request). When the URL
+  // changes by other means (back, forward, "Clear search"), the box follows it and any pending
+  // update is cancelled, so a stale term can never be written back.
   const [input, setInput] = useState(query);
   const [syncedQuery, setSyncedQuery] = useState(query);
   if (query !== syncedQuery) {
@@ -51,68 +59,51 @@ export function ExplorerPage() {
     },
     [],
   );
-  const onSearchInput = (value: string) => {
-    setInput(value);
-    clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => {
-      setParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          if (value.trim()) next.set('q', value);
-          else next.delete('q');
-          next.delete('page');
-          return next;
-        },
-        { replace: true },
-      );
-    }, SEARCH_DEBOUNCE_MS);
-  };
-  const data = result.data?.data;
-  const rows = data?.data ?? [];
-  const total = data?.pagination.total ?? 0;
-  const pages = pageCount(total);
-  const sort = { key: sortKey, direction: sortDirection };
-  const refreshing = result.isPlaceholderData && result.isFetching;
-
-  /** Updates URL parameters; any change other than the page returns to page 1. */
-  const update = (changes: Record<string, string | null>, replace = false) => {
+  const updateParams = (changes: Record<string, string | null>, replace: boolean) => {
     setParams(
       (current) => {
         const next = new URLSearchParams(current);
         for (const [key, value] of Object.entries(changes)) {
-          if (value === null || value === '') next.delete(key);
+          if (value === null || value.trim() === '') next.delete(key);
           else next.set(key, value);
         }
-        if (!('page' in changes)) next.delete('page');
+        next.delete('page'); // links from the earlier paginated Explorer
         return next;
       },
       { replace },
     );
   };
-
-  // A page number beyond the results (e.g. an old link) moves to the last page that exists.
-  const beyondEnd = !result.isPlaceholderData && data !== undefined && total > 0 && page > pages;
-  useEffect(() => {
-    if (!beyondEnd) return;
-    setParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        if (pages === 1) next.delete('page');
-        else next.set('page', String(pages));
-        return next;
-      },
-      { replace: true },
-    );
-  }, [beyondEnd, pages, setParams]);
-
-  const onSort = (key: SortKey) => {
-    const direction = sort.key === key && sort.direction === 'asc' ? 'desc' : 'asc';
-    const isDefault = key === DEFAULT_SORT.key && direction === DEFAULT_SORT.direction;
-    update({ sort: isDefault ? null : key, dir: isDefault ? null : direction });
+  const onSearchInput = (value: string) => {
+    setInput(value);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      updateParams({ q: value }, true);
+    }, SEARCH_DEBOUNCE_MS);
   };
 
-  const searching = searchTerm.trim() !== '';
-  const from = (page - 1) * PAGE_SIZE + 1;
+  // Infinite scroll: when the sentinel after the grid approaches the viewport, load the next page.
+  // The "Show more" button does the same for keyboard users and where IntersectionObserver is
+  // unavailable.
+  const sentinel = useRef<HTMLDivElement>(null);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage, isError } = list;
+  useEffect(() => {
+    const target = sentinel.current;
+    if (!target || !hasNextPage || isError || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting) && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { rootMargin: PREFETCH_MARGIN },
+    );
+    observer.observe(target);
+    return () => {
+      observer.disconnect();
+    };
+  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
+
+  const sortValue = `${sortKey}:${sortDirection}`;
 
   return (
     <Stack spacing={3}>
@@ -121,15 +112,14 @@ export function ExplorerPage() {
           Stocks
         </Typography>
         <Typography color="text.secondary">
-          Every stock in the active dataset, with its name, ticker and the first and last date for
-          which daily prices are available.
+          Every stock in the active dataset. Open one to see its price history, or compare several.
         </Typography>
       </Box>
 
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         spacing={2}
-        sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
+        sx={{ alignItems: { sm: 'center' } }}
       >
         <TextField
           label="Search by name or ticker"
@@ -150,29 +140,53 @@ export function ExplorerPage() {
             htmlInput: { autoComplete: 'off', spellCheck: false },
           }}
         />
-        {data && (
+        <TextField
+          select
+          label="Sort by"
+          value={sortValue}
+          onChange={(event) => {
+            const [key = DEFAULT_SORT.key, direction = DEFAULT_SORT.direction] =
+              event.target.value.split(':');
+            const isDefault = key === DEFAULT_SORT.key && direction === DEFAULT_SORT.direction;
+            updateParams(
+              { sort: isDefault ? null : key, dir: isDefault ? null : direction },
+              false,
+            );
+          }}
+          sx={{ width: { xs: '100%', sm: 240 } }}
+        >
+          {SORT_OPTIONS.map((option) => (
+            <MenuItem
+              key={`${option.key}:${option.direction}`}
+              value={`${option.key}:${option.direction}`}
+            >
+              {option.label}
+            </MenuItem>
+          ))}
+        </TextField>
+        {loaded && (
           <Typography
             role="status"
             variant="body2"
             color="text.secondary"
-            sx={{ fontVariantNumeric: 'tabular-nums' }}
+            sx={{ ml: { sm: 'auto' }, fontVariantNumeric: 'tabular-nums' }}
           >
-            {resultSummary(total, searching ? searchTerm.trim() : '')}
+            {resultSummary(stocks.length, total, searching ? query.trim() : '')}
           </Typography>
         )}
       </Stack>
 
-      {result.isError && data && (
+      {list.isError && loaded && (
         <StatusMessage
           kind="warning"
-          title="Could not load the requested stocks"
-          description="Showing the stocks loaded earlier."
+          title="Could not load more stocks"
+          description="The stocks loaded so far are still shown."
           action={
             <Button
               color="inherit"
               size="small"
               variant="outlined"
-              onClick={() => void result.refetch()}
+              onClick={() => void list.refetch()}
             >
               Try again
             </Button>
@@ -180,13 +194,20 @@ export function ExplorerPage() {
         />
       )}
 
-      {result.isPending && <StockTable rows={[]} sort={sort} onSort={onSort} loading />}
-
-      {result.isError && !data && (
-        <ListError error={result.error} onRetry={() => void result.refetch()} />
+      {list.isPending && (
+        <>
+          <Box role="status" sx={visuallyHidden}>
+            Loading stocks…
+          </Box>
+          <StockGridSkeleton count={12} />
+        </>
       )}
 
-      {data && total === 0 && !searching && (
+      {list.isError && !loaded && (
+        <ListError error={list.error} onRetry={() => void list.refetch()} />
+      )}
+
+      {loaded && total === 0 && !searching && (
         <StatusMessage
           kind="empty"
           title="The active dataset contains no stocks"
@@ -194,18 +215,18 @@ export function ExplorerPage() {
         />
       )}
 
-      {data && total === 0 && searching && (
+      {loaded && total === 0 && searching && (
         <StatusMessage
           kind="empty"
-          title="No tickers match your search"
-          description="Check the spelling or search for part of a ticker."
+          title="No stocks match your search"
+          description="Check the spelling or search for part of a name or ticker."
           action={
             <Button
               color="inherit"
               size="small"
               variant="outlined"
               onClick={() => {
-                update({ q: null });
+                updateParams({ q: null }, false);
               }}
             >
               Clear search
@@ -214,52 +235,46 @@ export function ExplorerPage() {
         />
       )}
 
-      {rows.length > 0 && (
-        <Stack spacing={2}>
-          <Box sx={{ position: 'relative' }}>
-            {refreshing && (
-              <LinearProgress
-                aria-label="Loading stocks"
-                sx={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1 }}
-              />
-            )}
-            <StockTable rows={rows} sort={sort} onSort={onSort} />
-          </Box>
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={1}
-            sx={{ alignItems: 'center', justifyContent: 'space-between' }}
-          >
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ fontVariantNumeric: 'tabular-nums' }}
-            >
-              Showing {from}–{from + rows.length - 1} of {total}
-            </Typography>
-            {pages > 1 && (
-              <Box component="nav" aria-label="Stock list pages">
-                <Pagination
-                  count={pages}
-                  page={Math.min(page, pages)}
-                  onChange={(_event, value) => {
-                    update({ page: value === 1 ? null : String(value) });
-                  }}
-                  shape="rounded"
-                  siblingCount={1}
-                />
-              </Box>
+      {stocks.length > 0 && (
+        <Box sx={{ position: 'relative' }} aria-busy={refreshing || isFetchingNextPage}>
+          {refreshing && (
+            <LinearProgress
+              aria-label="Loading stocks"
+              sx={{ position: 'absolute', top: -12, left: 0, right: 0, zIndex: 1 }}
+            />
+          )}
+          <StockGrid stocks={stocks} />
+          {isFetchingNextPage && (
+            <Box sx={{ mt: 2 }}>
+              <StockGridSkeleton count={4} />
+            </Box>
+          )}
+          <Box ref={sentinel} sx={{ height: 1 }} />
+          <Stack sx={{ alignItems: 'center', mt: 3 }}>
+            {hasNextPage ? (
+              <Button
+                variant="outlined"
+                disabled={isFetchingNextPage}
+                onClick={() => void fetchNextPage()}
+              >
+                {isFetchingNextPage ? 'Loading more stocks…' : 'Show more stocks'}
+              </Button>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                {searching ? 'All matching stocks are shown.' : 'All stocks are shown.'}
+              </Typography>
             )}
           </Stack>
-        </Stack>
+        </Box>
       )}
     </Stack>
   );
 }
 
-function resultSummary(total: number, query: string): string {
+function resultSummary(shown: number, total: number, query: string): string {
   const noun = total === 1 ? 'stock' : 'stocks';
-  return query ? `${String(total)} ${noun} match “${query}”` : `${String(total)} ${noun}`;
+  const count = shown < total ? `${String(shown)} of ${String(total)}` : String(total);
+  return query ? `${count} ${noun} match “${query}”` : `${count} ${noun}`;
 }
 
 /** No list at all: a dedicated explanation when no dataset is loaded, else the generic error. */

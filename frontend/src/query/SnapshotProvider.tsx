@@ -1,7 +1,7 @@
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
 import { SnapshotCoordinator } from '../api/snapshot';
-import { isSnapshotted } from './queryClient';
+import { isSnapshotted, isSnapshottedPages } from './queryClient';
 
 interface DatasetUpdate {
   /** True after a newer dataset than the one first seen was detected (until dismissed). */
@@ -39,6 +39,13 @@ export function SnapshotProvider({
         void queryClient.invalidateQueries({
           predicate: (query) =>
             isSnapshotted(query.state.data) && query.state.data.snapshot < snapshot,
+        });
+        // Infinite lists are reset, not refetched page by page: their pages must all come from one
+        // snapshot, so the list starts again from its first page.
+        void queryClient.resetQueries({
+          predicate: (query) =>
+            isSnapshottedPages(query.state.data) &&
+            (query.state.data.pages[0]?.snapshot ?? snapshot) < snapshot,
         });
       }),
     [coordinator, queryClient],

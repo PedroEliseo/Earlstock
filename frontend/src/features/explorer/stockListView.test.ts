@@ -1,30 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { pageCount, readViewState } from './stockListView';
-
-describe('pageCount', () => {
-  it('rounds up and is at least one', () => {
-    expect(pageCount(120, 50)).toBe(3);
-    expect(pageCount(100, 50)).toBe(2);
-    expect(pageCount(0, 50)).toBe(1);
-  });
-});
+import { readViewState, SORT_OPTIONS } from './stockListView';
 
 describe('readViewState', () => {
   it('reads valid parameters', () => {
-    expect(readViewState(new URLSearchParams('q=aa&sort=lastDate&dir=desc&page=3'))).toEqual({
+    expect(readViewState(new URLSearchParams('q=aa&sort=lastDate&dir=desc'))).toEqual({
       query: 'aa',
       sortKey: 'lastDate',
       sortDirection: 'desc',
-      page: 3,
     });
   });
 
-  it('falls back to defaults for missing or invalid parameters', () => {
-    expect(readViewState(new URLSearchParams('sort=price&dir=up&page=-2'))).toEqual({
+  it('falls back to defaults for missing or invalid parameters, and ignores old page numbers', () => {
+    expect(readViewState(new URLSearchParams('sort=price&dir=up&page=3'))).toEqual({
       query: '',
       sortKey: 'ticker',
       sortDirection: 'asc',
-      page: 1,
     });
+  });
+});
+
+describe('SORT_OPTIONS', () => {
+  it('offers every key in both directions exactly once', () => {
+    const values = SORT_OPTIONS.map((o) => `${o.key}:${o.direction}`);
+    expect(new Set(values).size).toBe(6);
   });
 });

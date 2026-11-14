@@ -90,4 +90,27 @@ describe('SnapshotProvider', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(screen.queryByText(/new dataset/)).not.toBeInTheDocument();
   });
+
+  it('resets infinite lists from an older dataset instead of refetching their pages', () => {
+    const queryClient = new QueryClient();
+    const coordinator = new SnapshotCoordinator();
+    const reset = vi.spyOn(queryClient, 'resetQueries');
+    render(
+      <SnapshotProvider queryClient={queryClient} coordinator={coordinator}>
+        <p>child</p>
+      </SnapshotProvider>,
+    );
+    act(() => {
+      coordinator.observe(1);
+      coordinator.observe(2);
+    });
+    const predicate = reset.mock.calls[0]?.[0]?.predicate;
+    // A list whose first page comes from the older snapshot is reset; a current one is not.
+    const listAt = (snapshot: number) =>
+      ({
+        state: { data: { pages: [{ snapshot, data: [] }], pageParams: [0] } },
+      }) as unknown as Parameters<NonNullable<typeof predicate>>[0];
+    expect(predicate?.(listAt(1))).toBe(true);
+    expect(predicate?.(listAt(2))).toBe(false);
+  });
 });

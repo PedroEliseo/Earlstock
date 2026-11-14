@@ -20,6 +20,20 @@ export function createQueryClient(): QueryClient {
   });
 }
 
+/**
+ * True for the data of an infinite query whose pages are snapshot-aware (pages[0] is the snapshot
+ * every later page must match).
+ */
+export function isSnapshottedPages(data: unknown): data is { pages: Snapshotted<unknown>[] } {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'pages' in data &&
+    Array.isArray(data.pages) &&
+    isSnapshotted(data.pages[0])
+  );
+}
+
 /** True for query data produced by a snapshot-aware query function. */
 export function isSnapshotted(data: unknown): data is Snapshotted<unknown> {
   return (

@@ -12,9 +12,14 @@
  *
  * Important: do not destructure `signal` in the wrapper's caller; that would read it immediately.
  */
-export function withSignal<T>(run: (signal: AbortSignal) => Promise<T>) {
-  return async (context: { readonly signal: AbortSignal }): Promise<T> => {
+export function withSignal<
+  T,
+  C extends { readonly signal: AbortSignal } = { readonly signal: AbortSignal },
+>(run: (signal: AbortSignal, context: C) => Promise<T>) {
+  return async (context: C): Promise<T> => {
     await Promise.resolve();
-    return run(context.signal);
+    // Other context fields (e.g. an infinite query's pageParam) can be read freely: only the
+    // signal getter marks the signal as consumed.
+    return run(context.signal, context);
   };
 }
