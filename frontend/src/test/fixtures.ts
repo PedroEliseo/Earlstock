@@ -24,21 +24,34 @@ export function manyStocks(count: number): StockSummary[] {
 }
 
 /**
- * A fake GET /api/stocks honouring limit/offset. `snapshotFor(callIndex)` chooses the snapshot of
- * each response (default: always 1).
+ * A fake GET /api/stocks with the backend's semantics: case-insensitive ticker substring `q`,
+ * `sort` (ticker, firstDate, lastDate) and `dir`, ties broken by ticker ascending (byte order),
+ * then limit/offset; `total` counts the matches. `snapshotFor(callIndex)` chooses each response's
+ * snapshot (default: always 1).
  */
 export function stockListServer(
   stocks: readonly StockSummary[],
   snapshotFor: (call: number) => number = () => 1,
 ): FakeServer {
   let call = 0;
+  const byte = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   return (url) => {
     const limit = Number(url.searchParams.get('limit') ?? '20');
     const offset = Number(url.searchParams.get('offset') ?? '0');
+    const q = (url.searchParams.get('q') ?? '').trim().toUpperCase();
+    const sort = (url.searchParams.get('sort') ?? 'ticker') as keyof StockSummary;
+    const sign = url.searchParams.get('dir') === 'desc' ? -1 : 1;
+    const matches = stocks
+      .filter((s) => s.ticker.toUpperCase().includes(q))
+      .sort((a, b) =>
+        sort === 'ticker'
+          ? sign * byte(a.ticker, b.ticker)
+          : sign * byte(a[sort], b[sort]) || byte(a.ticker, b.ticker),
+      );
     return jsonResponse(
       {
-        data: stocks.slice(offset, offset + limit),
-        pagination: { limit, offset, total: stocks.length },
+        data: matches.slice(offset, offset + limit),
+        pagination: { limit, offset, total: matches.length },
       },
       { snapshot: snapshotFor(call++) },
     );

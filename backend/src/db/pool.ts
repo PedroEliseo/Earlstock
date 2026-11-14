@@ -18,6 +18,11 @@ export function createPool(config: PoolSettings, logger: Logger = defaultLogger)
     // Bound the time a request can spend in the database, and never leave a transaction idle.
     statement_timeout: config.DATABASE_STATEMENT_TIMEOUT_MS ?? 5_000,
     idle_in_transaction_session_timeout: 10_000,
+    // No JIT compilation: API queries are short index lookups, but the planner can overestimate
+    // them (e.g. the stock list's per-stock MIN/MAX probes are estimated at millions of cost units),
+    // which triggers LLVM compilation costing far more than the query itself (measured on the stock
+    // list: about 66 ms of JIT for 2 ms of execution).
+    options: '-c jit=off',
     // Identifies these sessions in pg_stat_activity and server logs.
     application_name: 'earlstock-api',
   });

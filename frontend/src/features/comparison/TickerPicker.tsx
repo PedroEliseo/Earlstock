@@ -1,31 +1,30 @@
-import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
+import Autocomplete from '@mui/material/Autocomplete';
 import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
+import { useMemo, useState } from 'react';
 import { MAX_TICKERS, MIN_TICKERS } from './compareViewState';
+import { useTickerSearch } from './useTickerSearch';
 
 interface TickerPickerProps {
-  /** Tickers of the active dataset (from the stock list), or undefined while loading. */
-  available: readonly string[] | undefined;
-  loading: boolean;
   selected: readonly string[];
   onChange: (tickers: string[]) => void;
 }
 
-// Case-insensitive substring search; at most 100 suggestions are rendered at a time.
-const filterOptions = createFilterOptions<string>({
-  ignoreCase: true,
-  matchFrom: 'any',
-  limit: 100,
-});
-
 /**
- * Selection of 2–5 tickers from the stock list (no per-stock requests). Duplicates are impossible
- * (options are unique) and further options are disabled once five are selected. Selected tickers
- * that are not in the dataset (e.g. from a shared link) stay visible, marked as unknown.
+ * Selection of 2–5 tickers. Suggestions come from the API's ticker search as the user types (the
+ * API filters, so the component does not filter again). Duplicates are impossible (selected tickers
+ * are not suggested) and further options are disabled once five are selected. A ticker that is not
+ * in the dataset (e.g. from a shared link) is reported by the comparison itself, with a way to
+ * remove it.
  */
-export function TickerPicker({ available, loading, selected, onChange }: TickerPickerProps) {
-  const known = new Set(available ?? []);
-  const options = [...new Set([...(available ?? []), ...selected])];
+export function TickerPicker({ selected, onChange }: TickerPickerProps) {
+  const [input, setInput] = useState('');
+  // Autocomplete resets the typed text whenever `value` changes identity, so it must only change
+  // when the selection does (the parent re-derives `selected` from the URL on every render).
+  const selectedKey = selected.join(',');
+  const value = useMemo(() => (selectedKey ? selectedKey.split(',') : []), [selectedKey]);
+  const search = useTickerSearch(input);
+  const suggestions = search.data?.data.data.map((stock) => stock.ticker) ?? [];
   const full = selected.length >= MAX_TICKERS;
   const helper =
     selected.length < MIN_TICKERS
@@ -37,10 +36,17 @@ export function TickerPicker({ available, loading, selected, onChange }: TickerP
   return (
     <Autocomplete
       multiple
-      options={options}
-      value={[...selected]}
-      loading={loading}
-      filterOptions={filterOptions}
+      // Selected values must be among the options for MUI; the API suggestions are added after.
+      options={[...new Set([...value, ...suggestions])]}
+      value={value}
+      inputValue={input}
+      onInputChange={(_event, value) => {
+        setInput(value);
+      }}
+      loading={search.isFetching}
+      loadingText="Searching…"
+      noOptionsText={search.isError ? 'Could not search tickers' : 'No matching tickers'}
+      filterOptions={(options) => options}
       filterSelectedOptions
       getOptionDisabled={() => full}
       onChange={(_event, value) => {
@@ -49,17 +55,7 @@ export function TickerPicker({ available, loading, selected, onChange }: TickerP
       renderValue={(value, getItemProps) =>
         value.map((ticker, index) => {
           const { key, ...itemProps } = getItemProps({ index });
-          const unknown = available !== undefined && !known.has(ticker);
-          return (
-            <Chip
-              key={key}
-              {...itemProps}
-              label={unknown ? `${ticker} (not in dataset)` : ticker}
-              color={unknown ? 'error' : 'default'}
-              variant={unknown ? 'outlined' : 'filled'}
-              size="small"
-            />
-          );
+          return <Chip key={key} {...itemProps} label={ticker} size="small" />;
         })
       }
       renderInput={(params) => (

@@ -13,7 +13,6 @@ import { ErrorMessage, StatusMessage } from '../../components/StatusMessage';
 import { usePageTitle } from '../../components/usePageTitle';
 import { coverageConstraints, PRICE_BASES, type PriceBasis } from '../../domain/comparison';
 import type { RangeRequest } from '../../domain/ranges';
-import { useStockList } from '../../query/useStockList';
 import { visuallyHidden } from '../../theme/theme';
 import { ComparisonChartPanel } from './ComparisonChartPanel';
 import { StockNotFoundError } from './comparisonData';
@@ -34,7 +33,6 @@ export function ComparePage() {
   usePageTitle('Compare');
   const [params, setParams] = useSearchParams();
   const view = readCompareViewState(params);
-  const list = useStockList();
   const query = useComparison(view.tickers, view.range);
   const result = query.data?.data;
   const basis = view.basis;
@@ -66,8 +64,6 @@ export function ComparePage() {
 
       <Paper sx={{ p: 2 }}>
         <TickerPicker
-          available={list.data?.data.map((s) => s.ticker)}
-          loading={list.isPending}
           selected={view.tickers}
           onChange={(tickers) => {
             change({ tickers });

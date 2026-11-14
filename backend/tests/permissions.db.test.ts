@@ -108,6 +108,11 @@ describeWithDatabase('database permissions', () => {
       expect(rows[0]?.value).toBe('on');
     });
 
+    it('runs without JIT compilation (API queries are short lookups the planner can overestimate)', async () => {
+      const { rows } = await api.query<{ jit: string }>(`SELECT current_setting('jit') AS jit`);
+      expect(rows[0]?.jit).toBe('off');
+    });
+
     it.each(DATA_TABLES)('can SELECT from %s', async (table) => {
       const { rows } = await api.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table}`);
       expect(rows[0]?.n).toBe(1);

@@ -43,7 +43,7 @@ describe('stocks service', () => {
     );
 
     it.each([
-      ['list', () => service.list({ limit: 20, offset: 0 })],
+      ['list', () => service.list({ limit: 20, offset: 0, sort: 'ticker', dir: 'asc' })],
       ['getStock', () => service.getStock('AAPL')],
       ['getPrices', () => service.getPrices('AAPL', {}, 10)],
     ])('%s throws DatasetNotLoadedError (before any not-found check)', async (_name, call) => {
@@ -53,7 +53,12 @@ describe('stocks service', () => {
 
   it('returns the list together with the snapshot it was read from', async () => {
     await expect(
-      createStocksService(fakeRepository()).list({ limit: 20, offset: 0 }),
+      createStocksService(fakeRepository()).list({
+        limit: 20,
+        offset: 0,
+        sort: 'ticker',
+        dir: 'asc',
+      }),
     ).resolves.toEqual({ snapshot: SNAPSHOT, value: { items: [], total: 1 } });
   });
 

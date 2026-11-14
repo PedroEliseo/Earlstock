@@ -1,7 +1,7 @@
 import { DatasetNotLoadedError, NotFoundError } from '../../shared/errors.js';
-import type { Pagination } from '../../shared/http/pagination.js';
 import type { DateString } from '../../shared/types.js';
 import type { ActiveSnapshot } from '../dataset/dataset.repository.js';
+import type { ListStocksQuery } from './stocks.schemas.js';
 import type {
   DailyBar,
   DateRange,
@@ -29,10 +29,11 @@ function requireSnapshot(snapshot: ActiveSnapshot | null): ActiveSnapshot {
 
 export function createStocksService(repository: StocksRepository) {
   return {
+    /** One page of the stock list (optionally searched and ordered); `total` counts all matches. */
     async list(
-      pagination: Pagination,
+      query: ListStocksQuery,
     ): Promise<Snapshotted<{ items: StockSummary[]; total: number }>> {
-      const { snapshot, items, total } = await repository.list(pagination);
+      const { snapshot, items, total } = await repository.list(query);
       return { snapshot: requireSnapshot(snapshot), value: { items, total } };
     },
 

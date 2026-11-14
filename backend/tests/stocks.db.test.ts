@@ -128,6 +128,59 @@ describeWithDatabase('stocks API (database, API role)', () => {
       expect(tickersOf(res)).toEqual(['LIVE']);
       expect((res.body as { pagination: { total: number } }).pagination.total).toBe(1);
     });
+
+    it('searches tickers by case-insensitive substring; total counts the matches', async () => {
+      await seedActiveDataset(
+        fixtures,
+        ['BRK.A', 'BRK.B', 'ABRK', 'MSFT', 'BF.B'].map((ticker) => ({ ticker, days: 1 })),
+      );
+
+      const all = await request(app).get('/api/stocks?q=brk');
+      const firstPage = await request(app).get('/api/stocks?q=BRK&limit=2');
+      const blank = await request(app).get('/api/stocks?q=%20%20');
+
+      expect(tickersOf(all)).toEqual(['ABRK', 'BRK.A', 'BRK.B']);
+      expect((all.body as { pagination: unknown }).pagination).toEqual({
+        limit: 20,
+        offset: 0,
+        total: 3,
+      });
+      expect(tickersOf(firstPage)).toEqual(['ABRK', 'BRK.A']);
+      expect((firstPage.body as { pagination: { total: number } }).pagination.total).toBe(3);
+      expect((blank.body as { pagination: { total: number } }).pagination.total).toBe(5);
+    });
+
+    it.each(['%', '_', '\\', '.%', 'B_'])(
+      'matches the search term %j literally, never as a LIKE wildcard',
+      async (term) => {
+        await seedActiveDataset(
+          fixtures,
+          ['BF.B', 'BRK.B', 'MSFT'].map((ticker) => ({ ticker, days: 1 })),
+        );
+        const res = await request(app).get(`/api/stocks?q=${encodeURIComponent(term)}`);
+        expect(res.status).toBe(200);
+        expect(tickersOf(res)).toEqual([]);
+      },
+    );
+
+    it('orders by first or last date in both directions, ties broken by ticker ascending', async () => {
+      await seedActiveDataset(fixtures, [
+        { ticker: 'CCC', days: 10, endOffset: 0 }, // first date: day -9
+        { ticker: 'AAA', days: 3, endOffset: 0 }, // first date: day -2
+        { ticker: 'BBB', days: 3, endOffset: 0 }, // same coverage as AAA
+        { ticker: 'DDD', days: 2, endOffset: -5 }, // ends earliest
+      ]);
+      const order = async (query: string) =>
+        tickersOf(await request(app).get(`/api/stocks?${query}`));
+
+      expect(await order('sort=firstDate')).toEqual(['CCC', 'DDD', 'AAA', 'BBB']);
+      expect(await order('sort=firstDate&dir=desc')).toEqual(['AAA', 'BBB', 'DDD', 'CCC']);
+      expect(await order('sort=lastDate')).toEqual(['DDD', 'AAA', 'BBB', 'CCC']);
+      expect(await order('sort=lastDate&dir=desc')).toEqual(['AAA', 'BBB', 'CCC', 'DDD']);
+      expect(await order('dir=desc')).toEqual(['DDD', 'CCC', 'BBB', 'AAA']);
+      // Paging follows the same total order.
+      expect(await order('sort=lastDate&dir=desc&limit=2&offset=2')).toEqual(['CCC', 'DDD']);
+    });
   });
 
   describe('GET /api/stocks/:ticker', () => {

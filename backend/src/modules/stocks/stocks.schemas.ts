@@ -16,7 +16,29 @@ export const tickerParamsSchema = z.object({
     .regex(TICKER_PATTERN, 'must be a ticker such as AAPL, BRK.B or ^GSPC'),
 });
 
-export const listStocksQuerySchema = z.strictObject(paginationQuerySchema.shape);
+export const STOCK_SORT_KEYS = ['ticker', 'firstDate', 'lastDate'] as const;
+export type StockSortKey = (typeof STOCK_SORT_KEYS)[number];
+
+/**
+ * Stock list query: pagination plus optional search and order.
+ *  - `q`: case-insensitive substring of the ticker (blank = no filter). Matched literally: SQL LIKE
+ *    wildcards in it are escaped by the repository.
+ *  - `sort` / `dir`: order by ticker, first or last available date; ties are always broken by
+ *    ticker ascending, so pages are deterministic.
+ */
+export const listStocksQuerySchema = z.strictObject({
+  ...paginationQuerySchema.shape,
+  q: z
+    .string()
+    .trim()
+    .max(32)
+    .transform((value) => (value === '' ? undefined : value.toUpperCase()))
+    .optional(),
+  sort: z.enum(STOCK_SORT_KEYS).default('ticker'),
+  dir: z.enum(['asc', 'desc']).default('asc'),
+});
+
+export type ListStocksQuery = z.output<typeof listStocksQuerySchema>;
 
 const isoDate = z.iso.date({ error: 'must be a calendar date in YYYY-MM-DD format' });
 

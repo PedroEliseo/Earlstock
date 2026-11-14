@@ -43,6 +43,10 @@ describe('stocks API without a database', () => {
       ['offset=-1', ['offset']],
       ['limit=1&limit=2', ['limit']],
       ['unknown=1', ['']],
+      ['sort=price', ['sort']],
+      ['dir=up', ['dir']],
+      [`q=${'A'.repeat(33)}`, ['q']],
+      ['q=a&q=b', ['q']],
     ])('rejects list query %s', async (query, paths) => {
       const res = await request(app).get(`/api/stocks?${query}`);
 

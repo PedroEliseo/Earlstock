@@ -25,7 +25,11 @@ export function createStocksController(service: StocksService) {
       const query = parseInput(listStocksQuerySchema, req.query);
       const { snapshot, value } = await service.list(query);
       setSnapshotHeader(res, snapshot);
-      res.json({ data: value.items, pagination: { ...query, total: value.total } });
+      // `total` counts every stock matching `q`; the response echoes only the pagination fields.
+      res.json({
+        data: value.items,
+        pagination: { limit: query.limit, offset: query.offset, total: value.total },
+      });
     },
 
     getStock: async (req, res) => {

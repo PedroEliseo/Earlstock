@@ -8,46 +8,36 @@ import {
   stockDetailResponseSchema,
   type StockListResponse,
   stockListResponseSchema,
-  type StockSummary,
 } from './schemas';
 import type { ConsistentFetch } from './snapshot';
 
-/** The largest page the list endpoint accepts. */
-export const STOCK_LIST_PAGE_SIZE = 100;
+export type StockSortKey = 'ticker' | 'firstDate' | 'lastDate';
+export type SortDirection = 'asc' | 'desc';
 
-export function getStockListPage(
-  offset: number,
-  limit: number,
-  signal?: AbortSignal,
-): Promise<Snapshotted<StockListResponse>> {
-  return getJson(apiPath('/api/stocks', { limit, offset }), stockListResponseSchema, signal);
+export interface StockListQuery {
+  limit: number;
+  offset: number;
+  /** Case-insensitive ticker substring; blank or undefined = all stocks. */
+  q?: string | undefined;
+  sort?: StockSortKey;
+  dir?: SortDirection;
 }
 
 /**
- * Every stock of the active dataset, page by page. Run it through loadConsistent: `fetch` pins all
- * pages to one snapshot (and restarts the whole loop otherwise), so the pages can be concatenated.
- * Within one snapshot the list is fixed, so a changing total, an empty page before the end or a
- * repeated ticker means the response broke the contract.
+ * One page of the stock list, searched and ordered by the API (ties broken by ticker), with the
+ * total number of matching stocks in `pagination.total`. One request per view: the list is never
+ * downloaded in full.
  */
-export async function loadStockList(fetch: ConsistentFetch): Promise<StockSummary[]> {
-  const stocks: StockSummary[] = [];
-  let total: number | null = null;
-  while (total === null || stocks.length < total) {
-    const offset = stocks.length;
-    const page = await fetch((signal) => getStockListPage(offset, STOCK_LIST_PAGE_SIZE, signal));
-    if (total !== null && page.pagination.total !== total) {
-      throw new ResponseFormatError('the stock count changed within one dataset snapshot');
-    }
-    total = page.pagination.total;
-    if (page.data.length === 0 && stocks.length < total) {
-      throw new ResponseFormatError('the stock list ended before its reported total');
-    }
-    stocks.push(...page.data);
-  }
-  if (stocks.length !== total || new Set(stocks.map((s) => s.ticker)).size !== stocks.length) {
-    throw new ResponseFormatError('the stock list pages do not form one consistent list');
-  }
-  return stocks;
+export function getStockListPage(
+  { limit, offset, q, sort, dir }: StockListQuery,
+  signal?: AbortSignal,
+): Promise<Snapshotted<StockListResponse>> {
+  const term = q?.trim();
+  return getJson(
+    apiPath('/api/stocks', { limit, offset, q: term ? term : undefined, sort, dir }),
+    stockListResponseSchema,
+    signal,
+  );
 }
 
 /** The path of a stock's page. Tickers may contain characters such as "^", so they are encoded. */

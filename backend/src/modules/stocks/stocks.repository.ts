@@ -1,7 +1,7 @@
 import type { Database } from '../../db/database.js';
-import type { Pagination } from '../../shared/http/pagination.js';
 import type { DateString, DecimalString, IntegerString } from '../../shared/types.js';
 import { ISO_UTC, toActiveSnapshot } from '../dataset/dataset.repository.js';
+import type { ListStocksQuery, StockSortKey } from './stocks.schemas.js';
 
 export interface DailyBar {
   date: DateString;
@@ -56,31 +56,63 @@ const BAR_COLUMNS = (alias: string) => `
   trim_scale(${alias}.adj_close)::text AS "adjClose",
   ${alias}.volume::text AS "volume"`;
 
-const LIST_SQL = `
+/**
+ * Stock list: every stock with bars in the active snapshot, its first and last date, optionally
+ * filtered by ticker substring, ordered, and paged. The first/last dates are computed for every
+ * listed stock (each a MIN/MAX probe on the (stock_id, trade_date) primary key) because ordering by
+ * them must consider all stocks, not only the page. `position` carries the order through to the
+ * final SELECT. The ORDER BY comes from a fixed whitelist (STOCK_LIST_SQL), never from input.
+ */
+const SORT_COLUMN: Record<StockSortKey, string> = {
+  ticker: 'l.ticker',
+  firstDate: 'l.first_date',
+  lastDate: 'l.last_date',
+};
+
+function listSql(sort: StockSortKey, dir: 'asc' | 'desc'): string {
+  const direction = dir === 'desc' ? 'DESC' : 'ASC';
+  const order =
+    sort === 'ticker' ? `l.ticker ${direction}` : `${SORT_COLUMN[sort]} ${direction}, l.ticker ASC`;
+  return `
   WITH ${ACTIVE},
   listed AS (
-    SELECT st.id, st.ticker
+    SELECT st.ticker, c.first_date, c.last_date
     FROM stocks st
-    JOIN active a ON EXISTS (
-      SELECT 1 FROM daily_prices d WHERE d.stock_id = st.id AND d.import_id = a.import_id)
+    CROSS JOIN active a
+    CROSS JOIN LATERAL (
+      SELECT min(d.trade_date) AS first_date, max(d.trade_date) AS last_date
+      FROM daily_prices d WHERE d.stock_id = st.id AND d.import_id = a.import_id
+    ) c
+    WHERE c.first_date IS NOT NULL
+      AND ($3::text IS NULL OR st.ticker LIKE '%' || $3::text || '%' ESCAPE '\\')
   ),
   page AS (
-    SELECT l.ticker,
-      (SELECT to_char(d.trade_date, 'YYYY-MM-DD') FROM daily_prices d JOIN active a ON d.import_id = a.import_id
-        WHERE d.stock_id = l.id ORDER BY d.trade_date ASC LIMIT 1) AS first_date,
-      (SELECT to_char(d.trade_date, 'YYYY-MM-DD') FROM daily_prices d JOIN active a ON d.import_id = a.import_id
-        WHERE d.stock_id = l.id ORDER BY d.trade_date DESC LIMIT 1) AS last_date
+    SELECT l.*, row_number() OVER (ORDER BY ${order}) AS position
     FROM listed l
-    ORDER BY l.ticker
+    ORDER BY position
     LIMIT $1 OFFSET $2
   )
   SELECT a.import_id AS "importId", a.activated_at AS "activatedAt",
          (SELECT count(*)::int FROM listed) AS "total",
-         p.ticker, p.first_date AS "firstDate", p.last_date AS "lastDate"
+         p.ticker, to_char(p.first_date, 'YYYY-MM-DD') AS "firstDate",
+         to_char(p.last_date, 'YYYY-MM-DD') AS "lastDate"
   FROM (SELECT 1) AS sentinel
   LEFT JOIN active a ON true
   LEFT JOIN page p ON true
-  ORDER BY p.ticker`;
+  ORDER BY p.position`;
+}
+
+/** The six possible list statements, built once from constants. */
+const STOCK_LIST_SQL = Object.fromEntries(
+  (['ticker', 'firstDate', 'lastDate'] as const).flatMap((sort) =>
+    (['asc', 'desc'] as const).map((dir) => [`${sort}:${dir}`, listSql(sort, dir)] as const),
+  ),
+) as Record<`${StockSortKey}:${'asc' | 'desc'}`, string>;
+
+/** Escapes LIKE wildcards so a search term is matched literally. */
+function escapeLike(term: string): string {
+  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
 
 const DETAIL_SQL = `
   WITH ${ACTIVE},
@@ -169,7 +201,7 @@ interface SnapshotColumns {
 export function createStocksRepository(db: Database) {
   return {
     /** Stocks of the active snapshot, ordered by ticker ("C" collation), with the total count. */
-    async list({ limit, offset }: Pagination) {
+    async list({ limit, offset, q, sort, dir }: ListStocksQuery) {
       const rows = await db.query<
         SnapshotColumns & {
           total: number | null;
@@ -177,7 +209,11 @@ export function createStocksRepository(db: Database) {
           firstDate: unknown;
           lastDate: unknown;
         }
-      >('stocks.list', LIST_SQL, [limit, offset]);
+      >(`stocks.list.${sort}.${dir}`, STOCK_LIST_SQL[`${sort}:${dir}`], [
+        limit,
+        offset,
+        q === undefined ? null : escapeLike(q),
+      ]);
       const snapshot = toActiveSnapshot(rows[0]);
       const items: StockSummary[] = rows
         .filter((row) => row.ticker !== null)

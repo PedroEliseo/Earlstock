@@ -18,7 +18,8 @@ live prices and no external market-data services. EarlStock is not a trading or 
 
 - **Explorer** (`/`): every stock of the active dataset with its first and last available date.
   Case-insensitive ticker search, sorting by ticker or date, pages of 50; search, sort and page live
-  in the URL.
+  in the URL. The API searches, sorts and pages, so each view is a single request for the 50 rows
+  shown.
 - **Stock detail** (`/stocks/:ticker`): coverage, the latest daily bar, range presets (1M, 3M, 6M,
   YTD, 1Y, 3Y, 5Y, MAX) anchored to the stock's **last available date** (never today's date), a
   custom range, a candlestick or line chart (close or adjusted close) with volume, and a paged table
@@ -64,8 +65,8 @@ Every API query is a single SQL statement reading only the active import, and ev
 carries a **`Dataset-Snapshot: <importId>`** header naming the import it came from. The frontend
 uses it to guarantee consistency across requests:
 
-- A view built from several requests (all pages of the stock list, a stock's metadata plus every
-  price page, all stocks of a comparison) is loaded as one operation: every response must carry the
+- A view built from several requests (a stock's metadata plus every price page, all stocks of a
+  comparison) is loaded as one operation: every response must carry the
   same snapshot. If one differs, everything loaded so far is discarded, in-flight sibling requests
   are cancelled and the operation restarts (at most three attempts, then a recoverable error).
 - The frontend remembers the newest snapshot it has seen. A late response from an older snapshot is
@@ -259,12 +260,19 @@ must check that they all carry the same value, and start again if not.
 
 ### `GET /api/stocks`
 
-Stocks of the active dataset, ordered by ticker (byte-wise, locale-independent).
+Stocks of the active dataset, searched, ordered and paged by the database.
 
-| Query param | Default | Constraints    |
-| ----------- | ------- | -------------- |
-| `limit`     | `20`    | integer, 1–100 |
-| `offset`    | `0`     | integer, ≥ 0   |
+| Query param | Default  | Constraints / meaning |
+| ----------- | -------- | --------------------- |
+| `limit`     | `20`     | integer, 1–100 |
+| `offset`    | `0`      | integer, ≥ 0 |
+| `q`         | —        | Case-insensitive ticker substring, at most 32 characters; blank means no filter. Matched literally (`%` and `_` are not wildcards). |
+| `sort`      | `ticker` | `ticker`, `firstDate` or `lastDate` |
+| `dir`       | `asc`    | `asc` or `desc`; ties are always broken by ticker ascending, so pages are deterministic |
+
+Tickers order byte-wise (locale-independent). `pagination.total` counts every stock matching `q`.
+Sorting by date considers all matching stocks, not only the page: each stock's first and last date
+come from two index probes on the `(stock_id, trade_date)` primary key.
 
 ```json
 {
@@ -372,6 +380,9 @@ roles and passwords; the Compose defaults are for local development only.
 - **`trade_date`** is a `DATE` with no assumed range or calendar; any trading day can be stored.
 - **Primary key** `(stock_id, trade_date)` prevents duplicate bars and serves every per-stock query
   (date ranges, latest bar, first and last dates). No other indexes are added until a query needs one.
+- **No JIT for the API.** The API pool disables PostgreSQL's JIT compilation (`jit=off` per session):
+  its queries are short index lookups, but the planner can overestimate them. The stock list was
+  estimated at millions of cost units, triggering about 66 ms of LLVM compilation for 2 ms of work.
 - **Foreign keys** from `daily_prices` to `stocks` and `data_imports` do not cascade: deleting a stock
   or an import that still has prices fails.
 - A **succeeded** import must record `rows_read`, `stock_count` and `price_count` as non-NULL and

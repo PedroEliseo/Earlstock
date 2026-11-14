@@ -4,7 +4,7 @@ import { useParams } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { manyStocks, stock, stockListServer } from '../../test/fixtures';
 import { renderRoutes } from '../../test/render';
-import { errorResponse, stubFetch } from '../../test/stubFetch';
+import { errorResponse, requestUrl, stubFetch } from '../../test/stubFetch';
 import { ExplorerPage } from './ExplorerPage';
 
 function TickerProbe() {
@@ -21,45 +21,68 @@ const tickersShown = () =>
   within(screen.getByRole('table', { name: 'Stocks' }))
     .getAllByRole('rowheader')
     .map((cell) => cell.textContent);
+const queriesOf = (fetch: ReturnType<typeof stubFetch>) =>
+  fetch.mock.calls.map(([input]) => Object.fromEntries(requestUrl(input).searchParams));
 
 describe('ExplorerPage', () => {
-  it('shows a loading state, then every stock with its coverage', async () => {
-    stubFetch(stockListServer([stock('AAPL', 400, 1), stock('BRK.B', 300, 2)]));
+  it('loads only the visible page: one request, then the rows and the total', async () => {
+    const fetch = stubFetch(stockListServer(manyStocks(500)));
     renderRoutes(routes);
 
     expect(screen.getByText('Loading stocks…')).toBeInTheDocument();
-    await screen.findByRole('link', { name: 'AAPL' });
-    expect(tickersShown()).toEqual(['AAPL', 'BRK.B']);
-    expect(screen.getByText('2 stocks')).toBeInTheDocument();
+    await screen.findByRole('link', { name: 'T001' });
+    expect(tickersShown()).toHaveLength(50);
+    expect(screen.getByText('500 stocks')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1–50 of 500')).toBeInTheDocument();
+    expect(queriesOf(fetch)).toEqual([{ limit: '50', offset: '0', sort: 'ticker', dir: 'asc' }]);
   });
 
-  it('loads every page and paginates 50 rows on the client', async () => {
-    stubFetch(stockListServer(manyStocks(120)));
+  it('requests the next page with its offset, keeping the page in the URL', async () => {
+    const fetch = stubFetch(stockListServer(manyStocks(120)));
     const { router } = renderRoutes(routes);
     await screen.findByRole('link', { name: 'T001' });
 
-    expect(tickersShown()).toHaveLength(50);
-    expect(screen.getByText('Showing 1–50 of 120')).toBeInTheDocument();
-
     await userEvent.click(screen.getByRole('button', { name: 'Go to page 2' }));
-    expect(tickersShown()[0]).toBe('T051');
+
+    await screen.findByRole('link', { name: 'T051' });
     expect(router.state.location.search).toBe('?page=2');
+    expect(queriesOf(fetch).at(-1)).toMatchObject({ offset: '50', limit: '50' });
   });
 
-  it('filters case-insensitively without new requests, and returns to page 1', async () => {
+  it('searches through the API after typing pauses, and returns to page 1', async () => {
     const fetch = stubFetch(stockListServer([...manyStocks(60), stock('ZZTOP')]));
     const { router } = renderRoutes(routes, '/?page=2');
     await screen.findByRole('link', { name: 'T051' });
-    const requests = fetch.mock.calls.length;
 
     await userEvent.type(screen.getByRole('searchbox', { name: 'Search tickers' }), 'zzt');
 
     await waitFor(() => {
       expect(tickersShown()).toEqual(['ZZTOP']);
     });
-    expect(screen.getByText('1 of 61 stocks match “zzt”')).toBeInTheDocument();
+    expect(screen.getByText('1 stock match “zzt”')).toBeInTheDocument();
     expect(router.state.location.search).toBe('?q=zzt');
-    expect(fetch.mock.calls.length).toBe(requests);
+    // Debounced: no request for the intermediate terms "z" and "zz".
+    expect(queriesOf(fetch).map((q) => q['q'])).toEqual([undefined, 'ZZT']);
+  });
+
+  it('follows browser back after a search and never writes the old term back', async () => {
+    stubFetch(stockListServer([...manyStocks(60), stock('ZZTOP')]));
+    const { router } = renderRoutes(routes);
+    await screen.findByRole('link', { name: 'T001' });
+    await userEvent.click(screen.getByRole('button', { name: 'Go to page 2' }));
+    await screen.findByRole('link', { name: 'T051' });
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search tickers' }), 'zz');
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?q=zz');
+    });
+
+    await router.navigate(-1);
+
+    await screen.findByRole('link', { name: 'T001' });
+    // Well past the debounce delay: the URL and the box stay on the restored view.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(router.state.location.search).toBe('');
+    expect(screen.getByRole('searchbox', { name: 'Search tickers' })).toHaveValue('');
   });
 
   it('shows a no-results state with a way to clear the search', async () => {
@@ -71,25 +94,40 @@ describe('ExplorerPage', () => {
     expect(await screen.findByRole('link', { name: 'AAPL' })).toBeInTheDocument();
   });
 
-  it('sorts by column in both directions and shows the active direction', async () => {
-    stubFetch(stockListServer([stock('AAA', 10, 5), stock('BBB', 30, 1), stock('CCC', 20, 3)]));
+  it('sorts through the API in both directions and shows the active direction', async () => {
+    const fetch = stubFetch(
+      stockListServer([stock('AAA', 10, 5), stock('BBB', 30, 1), stock('CCC', 20, 3)]),
+    );
     renderRoutes(routes);
     await screen.findByRole('link', { name: 'AAA' });
 
-    const firstDate = screen.getByRole('button', { name: /First date/ });
-    await userEvent.click(firstDate);
-    expect(tickersShown()).toEqual(['BBB', 'CCC', 'AAA']);
+    await userEvent.click(screen.getByRole('button', { name: /First date/ }));
+    await waitFor(() => {
+      expect(tickersShown()).toEqual(['BBB', 'CCC', 'AAA']);
+    });
     expect(screen.getByRole('columnheader', { name: /First date/ })).toHaveAttribute(
       'aria-sort',
       'ascending',
     );
+    expect(queriesOf(fetch).at(-1)).toMatchObject({ sort: 'firstDate', dir: 'asc' });
 
     await userEvent.click(screen.getByRole('button', { name: /First date/ }));
-    expect(tickersShown()).toEqual(['AAA', 'CCC', 'BBB']);
+    await waitFor(() => {
+      expect(tickersShown()).toEqual(['AAA', 'CCC', 'BBB']);
+    });
     expect(screen.getByRole('columnheader', { name: /First date/ })).toHaveAttribute(
       'aria-sort',
       'descending',
     );
+  });
+
+  it('moves a page number beyond the results to the last page', async () => {
+    stubFetch(stockListServer(manyStocks(60)));
+    const { router } = renderRoutes(routes, '/?page=9');
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?page=2');
+    });
+    expect(await screen.findByRole('link', { name: 'T051' })).toBeInTheDocument();
   });
 
   it('explains an empty dataset', async () => {
@@ -120,16 +158,6 @@ describe('ExplorerPage', () => {
     fail = false;
     await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByRole('link', { name: 'AAPL' })).toBeInTheDocument();
-  });
-
-  it('never shows a list mixed from two snapshots; a persistent change is recoverable', async () => {
-    stubFetch(stockListServer(manyStocks(150), (call) => call + 1));
-    renderRoutes(routes);
-
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('The dataset is being updated');
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
-    expect(within(alert).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   it('links to the stock page, encoding special characters', async () => {
