@@ -17,7 +17,7 @@ import { ChartPanel } from './ChartPanel';
 import { PriceTable } from './PriceTable';
 import { RangeControls } from '../../components/RangeControls';
 import { StockHeader } from './StockHeader';
-import { type ChartType, type LineField, readDetailViewState, withViewChanges } from './stockView';
+import { type ChartType, readDetailViewState, withViewChanges } from './stockView';
 import { useStockView } from './useStockView';
 
 /**
@@ -33,11 +33,7 @@ export function StockDetailPage() {
   const loadedName = query.data?.data.detail.name;
   usePageTitle(loadedName ? `${loadedName} (${ticker})` : ticker);
 
-  const change = (changes: {
-    range?: RangeRequest;
-    chartType?: ChartType;
-    lineField?: LineField;
-  }) => {
+  const change = (changes: { range?: RangeRequest; chartType?: ChartType }) => {
     const next = withViewChanges(params, changes);
     if (next.toString() !== params.toString()) setParams(next);
   };
@@ -160,13 +156,9 @@ export function StockDetailPage() {
             ticker={detail.ticker}
             bars={bars}
             chartType={view.chartType}
-            lineField={view.lineField}
             refreshing={refreshing}
             onChartType={(chartType) => {
               change({ chartType });
-            }}
-            onLineField={(lineField) => {
-              change({ lineField });
             }}
           />
           <PriceTable key={`${range.from}..${range.to}`} bars={bars} />

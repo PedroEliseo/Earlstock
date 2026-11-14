@@ -1,6 +1,6 @@
 import type { Bar } from '../../../api/schemas';
 import { decimalPlaces } from '../../../domain/decimal';
-import type { ChartType, LineField } from '../stockView';
+import type { ChartType } from '../stockView';
 
 export type PriceField = 'open' | 'high' | 'low' | 'close' | 'adjClose';
 
@@ -35,9 +35,9 @@ export function toCandles(bars: readonly Bar[]): CandlePoint[] {
   }));
 }
 
-/** A single value per day: close or adjusted close, as selected. */
-export function toLine(bars: readonly Bar[], field: LineField): ValuePoint[] {
-  return bars.map((bar) => ({ time: bar.date, value: Number(bar[field]) }));
+/** The close of each day, for the line chart. */
+export function toLine(bars: readonly Bar[]): ValuePoint[] {
+  return bars.map((bar) => ({ time: bar.date, value: Number(bar.close) }));
 }
 
 /** Volume per day, on the same dates as the price series. */
@@ -45,9 +45,9 @@ export function toVolume(bars: readonly Bar[]): ValuePoint[] {
   return bars.map((bar) => ({ time: bar.date, value: bar.volume }));
 }
 
-/** The fields a chart draws: OHLC for candles, the selected value for a line. */
-export function drawnFields(chartType: ChartType, lineField: LineField): readonly PriceField[] {
-  return chartType === 'candles' ? ['open', 'high', 'low', 'close'] : [lineField];
+/** The fields a chart draws: OHLC for candles, the close for a line. */
+export function drawnFields(chartType: ChartType): readonly PriceField[] {
+  return chartType === 'candles' ? ['open', 'high', 'low', 'close'] : ['close'];
 }
 
 /** Axis precision: the most decimals written in the DRAWN values, between 2 and 6. */

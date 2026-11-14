@@ -51,24 +51,32 @@ describe('detail view state in the URL', () => {
     expect(readDetailViewState(new URLSearchParams(''))).toEqual({
       range: { kind: 'default' },
       chartType: 'candles',
-      lineField: 'close',
       invalid: false,
     });
     expect(readDetailViewState(new URLSearchParams('range=3M&chart=line&series=adjClose'))).toEqual(
       {
         range: { kind: 'preset', preset: '3M' },
         chartType: 'line',
-        lineField: 'adjClose',
         invalid: false,
       },
     );
+  });
+
+  it('ignores the former line-value setting of older links without reporting it', () => {
+    expect(readDetailViewState(new URLSearchParams('chart=line&series=adjClose'))).toEqual({
+      range: { kind: 'default' },
+      chartType: 'line',
+      invalid: false,
+    });
+    expect(
+      withViewChanges(new URLSearchParams('series=adjClose'), { chartType: 'line' }).toString(),
+    ).toBe('chart=line');
   });
 
   it('reports unknown values and falls back to defaults', () => {
     expect(readDetailViewState(new URLSearchParams('chart=pie&series=open&range=1W'))).toEqual({
       range: { kind: 'default' },
       chartType: 'candles',
-      lineField: 'close',
       invalid: true,
     });
   });

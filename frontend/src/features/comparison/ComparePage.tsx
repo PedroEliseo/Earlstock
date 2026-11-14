@@ -3,21 +3,18 @@ import Button from '@mui/material/Button';
 import Paper from '@mui/material/Paper';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import { useSearchParams } from 'react-router';
 import { ApiError, describeError } from '../../api/errors';
 import { RangeControls } from '../../components/RangeControls';
 import { ErrorMessage, StatusMessage } from '../../components/StatusMessage';
 import { usePageTitle } from '../../components/usePageTitle';
-import { coverageConstraints, PRICE_BASES, type PriceBasis } from '../../domain/comparison';
+import type { PriceBasis } from '../../domain/comparison';
 import type { RangeRequest } from '../../domain/ranges';
 import { visuallyHidden } from '../../theme/theme';
 import { ComparisonChartPanel } from './ComparisonChartPanel';
 import { StockNotFoundError } from './comparisonData';
 import { buildComparisonModel } from './comparisonModel';
-import { BASIS_LABEL, ComparisonSummary } from './ComparisonSummary';
 import { MIN_TICKERS, readCompareViewState, withCompareChanges } from './compareViewState';
 import { MetricsTable } from './MetricsTable';
 import { ObservationsTable } from './ObservationsTable';
@@ -25,17 +22,20 @@ import { TickerPicker } from './TickerPicker';
 import { useComparison } from './useComparison';
 
 /**
- * Comparison of 2–5 stocks on their common trading dates. Selection, range and price basis live in
+ * Comparison of 2–5 stocks on their common trading dates. Selection and range live in
  * the URL (one history entry per change). Chart, metrics and table are all derived from ONE model,
  * built from one snapshot-consistent query result.
  */
+/** Comparisons use the close of every stock (adjusted close remains visible on stock pages). */
+const COMPARISON_BASIS: PriceBasis = 'close';
+
 export function ComparePage() {
   usePageTitle('Compare');
   const [params, setParams] = useSearchParams();
   const view = readCompareViewState(params);
   const query = useComparison(view.tickers, view.range);
   const result = query.data?.data;
-  const basis = view.basis;
+  const basis: PriceBasis = COMPARISON_BASIS;
 
   // Derived on each render of this page (URL or query changes only). Hovering re-renders just the
   // chart panel, which keeps receiving the same model object, so the chart is not re-fed.
@@ -46,11 +46,7 @@ export function ComparePage() {
       )
     : null;
 
-  const change = (changes: {
-    tickers?: readonly string[];
-    range?: RangeRequest;
-    basis?: PriceBasis;
-  }) => {
+  const change = (changes: { tickers?: readonly string[]; range?: RangeRequest }) => {
     const next = withCompareChanges(params, changes);
     if (next.toString() !== params.toString()) setParams(next);
   };
@@ -87,7 +83,7 @@ export function ComparePage() {
         <StatusMessage
           kind="info"
           title="Some settings in the address were not recognized"
-          description="The default range or price basis is shown instead."
+          description="The default range is shown instead."
         />
       )}
 
@@ -145,34 +141,8 @@ export function ComparePage() {
                         change({ range });
                       }}
                     />
-                    <ToggleButtonGroup
-                      size="small"
-                      exclusive
-                      value={basis}
-                      aria-label="Price basis"
-                      onChange={(_event, value: PriceBasis | null) => {
-                        if (value) change({ basis: value });
-                      }}
-                    >
-                      {PRICE_BASES.map((b) => (
-                        <ToggleButton key={b} value={b}>
-                          {BASIS_LABEL[b]}
-                        </ToggleButton>
-                      ))}
-                    </ToggleButtonGroup>
                   </Stack>
                 </Paper>
-                {model && (
-                  <ComparisonSummary
-                    range={result.range}
-                    dates={model.dates}
-                    basis={basis}
-                    {...coverageConstraints(
-                      result.stocks.map((s) => ({ ticker: s.ticker, coverage: s.detail.coverage })),
-                      result.common,
-                    )}
-                  />
-                )}
                 {model && model.dates.length === 0 && (
                   <StatusMessage
                     kind="empty"
@@ -197,7 +167,7 @@ export function ComparePage() {
                   <>
                     <MetricsTable model={model} />
                     <ObservationsTable
-                      key={`${model.dates[0] ?? ''}..${model.dates.at(-1) ?? ''}:${basis}`}
+                      key={`${model.dates[0] ?? ''}..${model.dates.at(-1) ?? ''}`}
                       model={model}
                     />
                   </>

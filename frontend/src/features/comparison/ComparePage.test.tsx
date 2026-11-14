@@ -36,16 +36,16 @@ describe('ComparePage', () => {
     expect(await screen.findByText('Select at least two stocks to compare')).toBeInTheDocument();
   });
 
-  it('compares on common dates only and says which stock limits the period', async () => {
+  it('compares on common dates only, from the first date all stocks share', async () => {
     open('?tickers=AAA,BBB&range=MAX');
 
     expect(await screen.findByTestId('chart')).toHaveTextContent(
       `AAA:120:100|BBB:120:100@${bbb[0]?.date ?? ''}`,
     );
-    const summary = screen.getByRole('region', { name: 'What is compared' });
-    expect(summary).toHaveTextContent('120'); // common observations
-    expect(summary).toHaveTextContent(`history of BBB begins`);
-    expect(summary).toHaveTextContent('Close');
+    // The chart description names the basis and the common baseline date.
+    expect(screen.getByText(/Index of close: each stock = 100 on/)).toHaveTextContent(
+      bbb[0]?.date ?? '',
+    );
 
     const metrics = screen.getByRole('table', { name: 'Performance metrics' });
     expect(within(metrics).getAllByRole('row')).toHaveLength(3);
@@ -60,15 +60,25 @@ describe('ComparePage', () => {
     expect(within(observations).getAllByRole('row')[1]).toHaveTextContent(aaa.at(-1)?.date ?? '');
   });
 
-  it('switches the price basis for every stock through the URL', async () => {
-    const { router } = open('?tickers=AAA,BBB');
+  it('always compares closes: no price-basis choice, and older basis links are ignored', async () => {
+    const { router } = open('?tickers=AAA,BBB&basis=adjClose');
     await screen.findByTestId('chart');
-    await userEvent.click(screen.getByRole('button', { name: 'Adjusted close' }));
+
+    expect(screen.queryByRole('button', { name: 'Adjusted close' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Some settings in the address were not recognized'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'AAA close' })).toBeInTheDocument();
+    expect(screen.getByText(/Index of close/)).toBeInTheDocument();
+    // The next change writes a clean URL without the former basis parameter.
+    await userEvent.click(
+      within(screen.getByRole('group', { name: 'Time range' })).getByRole('button', {
+        name: '1M',
+      }),
+    );
     await waitFor(() => {
-      expect(router.state.location.search).toBe('?tickers=AAA%2CBBB&basis=adjClose');
+      expect(router.state.location.search).toBe('?tickers=AAA%2CBBB&range=1M');
     });
-    expect(screen.getByRole('columnheader', { name: 'AAA adjusted close' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'BBB adjusted close' })).toBeInTheDocument();
   });
 
   it('adds and removes stocks, one history entry each, and restores on back', async () => {

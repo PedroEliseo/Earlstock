@@ -10,14 +10,13 @@ import type { Bar } from '../../../api/schemas';
 import { priceFormat, volumeFormat } from '../../../components/chart/chartFormat';
 import { useChartColors } from '../../../components/chart/useChartColors';
 import { isChartAlive, useLightweightChart } from '../../../components/chart/useLightweightChart';
-import type { ChartType, LineField } from '../stockView';
+import type { ChartType } from '../stockView';
 import { drawnFields, pricePrecision, toCandles, toLine, toVolume } from './chartData';
 
 export interface PriceChartProps {
   /** Bars of the selected range, oldest first. */
   bars: readonly Bar[];
   chartType: ChartType;
-  lineField: LineField;
   /** Text alternative for the canvas (the price table holds the full data). */
   description: string;
   /** Called with the date under the crosshair, or null when it leaves the chart. */
@@ -34,19 +33,13 @@ const VOLUME_SCALE = 'volume';
  *  1. volume series: created once per chart.
  *  2. price series: re-created only when the chart TYPE changes (a candle series cannot become a
  *     line series); cleanup removes it, unless the chart itself is already gone.
- *  3. data: pushed with setData whenever the bars or the displayed value change; no re-creation.
+ *  3. data: pushed with setData whenever the bars or the chart type change; no re-creation.
  *  4. colors: applied with applyOptions when the theme changes; no re-creation.
  *
  * Effects run in declaration order within a commit (and clean up in the same order), so these
  * always find the chart created by the hook, also across React Strict Mode's remount.
  */
-export default function PriceChart({
-  bars,
-  chartType,
-  lineField,
-  description,
-  onHover,
-}: PriceChartProps) {
+export default function PriceChart({ bars, chartType, description, onHover }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useLightweightChart(
     containerRef,
@@ -100,16 +93,16 @@ export default function PriceChart({
     const chart = chartRef.current;
     const price = priceRef.current;
     if (!chart || !price) return;
-    const precision = pricePrecision(bars, drawnFields(chartType, lineField));
+    const precision = pricePrecision(bars, drawnFields(chartType));
     price.applyOptions({ priceFormat: priceFormat(precision) });
     if (chartType === 'candles') {
       (price as ISeriesApi<'Candlestick'>).setData(toCandles(bars));
     } else {
-      (price as ISeriesApi<'Line'>).setData(toLine(bars, lineField));
+      (price as ISeriesApi<'Line'>).setData(toLine(bars));
     }
     volumeRef.current?.setData(toVolume(bars));
     chart.timeScale().fitContent();
-  }, [chartRef, bars, chartType, lineField]);
+  }, [chartRef, bars, chartType]);
 
   // 4. Theme colors. Rising candles are hollow and falling ones filled, so direction is not
   // conveyed by color alone.

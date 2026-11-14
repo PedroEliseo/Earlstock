@@ -8,6 +8,12 @@ import {
   type VolatilityResult,
 } from '../../domain/performance';
 
+/** Display label of each price basis. */
+export const BASIS_LABEL: Record<PriceBasis, string> = {
+  close: 'Close',
+  adjClose: 'Adjusted close',
+};
+
 export interface ComparedStock {
   ticker: string;
   /** Name from the stock's metadata (same snapshot), or null when the dataset has none. */

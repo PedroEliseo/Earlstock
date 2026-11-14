@@ -1,4 +1,3 @@
-import { type PriceBasis, PRICE_BASES } from '../../domain/comparison';
 import { type RangeRequest, readRangeRequest } from '../../domain/ranges';
 import { parseTickerList, type TickerListResult } from '../../domain/tickers';
 
@@ -10,30 +9,29 @@ export interface CompareViewState {
   /** What was dropped from the `tickers` parameter, and why. */
   ignored: Omit<TickerListResult, 'tickers'>;
   range: RangeRequest;
-  basis: PriceBasis;
-  /** The range or basis parameter was not understood; defaults are shown. */
+  /** The range parameter was not understood; the default range is shown. */
   invalidSettings: boolean;
 }
 
-/** `?tickers=AAA,BBB&range=1Y&basis=adjClose`; invalid parts fall back to defaults and are reported. */
+/**
+ * `?tickers=AAA,BBB&range=1Y`; invalid parts fall back to defaults and are reported. Comparisons
+ * always use the close; a `basis` parameter from older links is ignored.
+ */
 export function readCompareViewState(params: URLSearchParams): CompareViewState {
   const { tickers, ...ignored } = parseTickerList(params.get('tickers'), MAX_TICKERS);
   const { request, invalid } = readRangeRequest(params);
-  const basisParam = params.get('basis');
-  const basisValid = basisParam === null || (PRICE_BASES as readonly string[]).includes(basisParam);
   return {
     tickers,
     ignored,
     range: request,
-    basis: basisValid && basisParam !== null ? (basisParam as PriceBasis) : 'close',
-    invalidSettings: invalid || !basisValid,
+    invalidSettings: invalid,
   };
 }
 
 /** Writes changes into URL parameters, omitting defaults. */
 export function withCompareChanges(
   current: URLSearchParams,
-  changes: { tickers?: readonly string[]; range?: RangeRequest; basis?: PriceBasis },
+  changes: { tickers?: readonly string[]; range?: RangeRequest },
 ): URLSearchParams {
   const next = new URLSearchParams(current);
   if (changes.tickers) {
@@ -52,9 +50,6 @@ export function withCompareChanges(
       next.set('to', range.to);
     }
   }
-  if (changes.basis) {
-    if (changes.basis === 'close') next.delete('basis');
-    else next.set('basis', changes.basis);
-  }
+  next.delete('basis'); // the former price-basis setting, no longer used
   return next;
 }

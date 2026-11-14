@@ -100,7 +100,7 @@ beforeEach(() => {
 });
 
 const bars = makeBars(5);
-const props = { bars, chartType: 'candles', lineField: 'close', description: 'Chart' } as const;
+const props = { bars, chartType: 'candles', description: 'Chart' } as const;
 const liveCharts = () => lib.state.charts.filter((c) => !c.removed);
 const liveSeries = (type: string) =>
   liveCharts().flatMap((c) => c.series.filter((s) => s.type === type && !s.removed));
@@ -137,12 +137,12 @@ describe('PriceChart lifecycle', () => {
       expect.arrayContaining([expect.objectContaining({ time: newer[7]?.date })]),
     );
 
-    rerender(<PriceChart {...props} bars={newer} chartType="line" lineField="adjClose" />);
+    rerender(<PriceChart {...props} bars={newer} chartType="line" />);
     expect(lib.createChart).toHaveBeenCalledOnce();
     expect(liveSeries('Candlestick')).toHaveLength(0);
     expect(liveSeries('Line')).toHaveLength(1);
     expect(liveSeries('Line')[0]?.setData).toHaveBeenLastCalledWith(
-      newer.map((b) => ({ time: b.date, value: Number(b.adjClose) })),
+      newer.map((b) => ({ time: b.date, value: Number(b.close) })),
     );
     expect(liveSeries('Histogram')).toHaveLength(1);
   });

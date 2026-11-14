@@ -19,11 +19,10 @@ describe('chart data', () => {
     expect(candles.some((c, i) => c.close === Number(bars[i]?.adjClose))).toBe(false);
   });
 
-  it('draws the selected line value', () => {
-    expect(toLine(bars, 'close').map((p) => p.value)).toEqual(bars.map((b) => Number(b.close)));
-    expect(toLine(bars, 'adjClose').map((p) => p.value)).toEqual(
-      bars.map((b) => Number(b.adjClose)),
-    );
+  it('draws the close as the line value', () => {
+    expect(toLine(bars).map((p) => p.value)).toEqual(bars.map((b) => Number(b.close)));
+    // The line always shows the close, never the adjusted close.
+    expect(toLine(bars).some((p, i) => p.value === Number(bars[i]?.adjClose))).toBe(false);
   });
 
   it('aligns volume with the price dates', () => {
@@ -32,12 +31,12 @@ describe('chart data', () => {
   });
 
   it('chooses the axis precision from the decimals of the drawn values only (2 to 6)', () => {
-    const candles = drawnFields('candles', 'close');
+    const candles = drawnFields('candles');
     expect(candles).toEqual(['open', 'high', 'low', 'close']);
     expect(pricePrecision(bars, candles)).toBe(2);
     const precise = [{ ...firstBar, adjClose: '1.1234' }];
     expect(pricePrecision(precise, candles)).toBe(2); // adjusted close is not drawn by candles
-    expect(pricePrecision(precise, drawnFields('line', 'adjClose'))).toBe(4);
+    expect(pricePrecision(precise, drawnFields('line'))).toBe(2); // the line draws the close only
     expect(pricePrecision([{ ...firstBar, close: '1.12345678' }], ['close'])).toBe(6);
   });
 });

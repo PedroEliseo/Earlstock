@@ -4,7 +4,6 @@ import { daysAgo } from '../test/fixtures';
 import {
   alignOnCommonDates,
   commonCoverage,
-  coverageConstraints,
   InvalidPriceError,
   normalizeTo100,
 } from './comparison';
@@ -20,7 +19,7 @@ const bar = (date: string, close: string, adjClose = close): Bar => ({
   volume: 1,
 });
 
-describe('commonCoverage and coverageConstraints', () => {
+describe('commonCoverage', () => {
   const stocks = [
     { ticker: 'AAA', coverage: { firstDate: d(1), lastDate: d(50) } },
     { ticker: 'BBB', coverage: { firstDate: d(10), lastDate: d(60) } },
@@ -39,21 +38,6 @@ describe('commonCoverage and coverageConstraints', () => {
       ]),
     ).toBeNull();
     expect(commonCoverage([])).toBeNull();
-  });
-
-  it('names the stocks that bound the common period', () => {
-    expect(coverageConstraints(stocks, { firstDate: d(10), lastDate: d(40) })).toEqual({
-      startsLate: ['BBB'],
-      endsEarly: ['CCC'],
-    });
-  });
-
-  it('names nobody when all histories are identical', () => {
-    const same = stocks.map((s) => ({ ...s, coverage: { firstDate: d(1), lastDate: d(9) } }));
-    expect(coverageConstraints(same, { firstDate: d(1), lastDate: d(9) })).toEqual({
-      startsLate: [],
-      endsEarly: [],
-    });
   });
 });
 

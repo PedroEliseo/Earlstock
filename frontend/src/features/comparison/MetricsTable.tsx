@@ -14,16 +14,13 @@ import {
   MIN_DAILY_RETURNS,
   TRADING_DAYS_PER_YEAR,
 } from '../../domain/performance';
-import type { ComparisonModel } from './comparisonModel';
-import { BASIS_LABEL } from './ComparisonSummary';
+import { BASIS_LABEL, type ComparisonModel } from './comparisonModel';
 import { SeriesSwatch } from './SeriesSwatch';
 
 const NOT_AVAILABLE = 'Not enough data';
 
 /** Per-stock metrics over the common observations, with their definitions stated. */
 export function MetricsTable({ model }: { model: ComparisonModel }) {
-  const first = model.dates[0] ?? '—';
-  const last = model.dates.at(-1) ?? '—';
   const count = formatInteger(model.dates.length);
   return (
     <Paper component="section" aria-labelledby="metrics-heading">
@@ -46,8 +43,6 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
               <TableCell align="right">Annualized volatility</TableCell>
               <TableCell align="right">Daily returns used</TableCell>
               <TableCell align="right">Max drawdown</TableCell>
-              <TableCell align="right">First common date</TableCell>
-              <TableCell align="right">Last common date</TableCell>
               <TableCell align="right">Observations</TableCell>
             </TableRow>
           </TableHead>
@@ -83,8 +78,6 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
                 <TableCell align="right">
                   {stock.maxDrawdown === null ? NOT_AVAILABLE : formatPercent(stock.maxDrawdown)}
                 </TableCell>
-                <TableCell align="right">{first}</TableCell>
-                <TableCell align="right">{last}</TableCell>
                 <TableCell align="right">{count}</TableCell>
               </TableRow>
             ))}

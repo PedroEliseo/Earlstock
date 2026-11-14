@@ -8,7 +8,7 @@ import { lazy, Suspense, useState } from 'react';
 import type { Bar } from '../../api/schemas';
 import { formatDecimal, formatInteger } from '../../domain/decimal';
 import { ChartControls } from './ChartControls';
-import { type ChartType, LINE_FIELD_LABEL, type LineField } from './stockView';
+import type { ChartType } from './stockView';
 
 // The chart library is loaded only when a chart is actually shown (its own chunk).
 const PriceChart = lazy(() => import('./chart/PriceChart'));
@@ -17,29 +17,19 @@ interface ChartPanelProps {
   ticker: string;
   bars: readonly Bar[];
   chartType: ChartType;
-  lineField: LineField;
   refreshing: boolean;
   onChartType: (type: ChartType) => void;
-  onLineField: (field: LineField) => void;
 }
 
 /**
  * Chart controls, an exact-value legend for the bar under the crosshair (or the last bar), the
  * chart itself and its text alternative. Legend values come from the original decimal strings.
  */
-export function ChartPanel({
-  ticker,
-  bars,
-  chartType,
-  lineField,
-  refreshing,
-  onChartType,
-  onLineField,
-}: ChartPanelProps) {
+export function ChartPanel({ ticker, bars, chartType, refreshing, onChartType }: ChartPanelProps) {
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
   const shown =
     (hoveredDate ? bars.find((bar) => bar.date === hoveredDate) : undefined) ?? bars.at(-1);
-  const description = describeChart(ticker, bars, chartType, lineField);
+  const description = describeChart(ticker, bars, chartType);
 
   return (
     <Paper component="section" aria-labelledby="chart-heading" sx={{ p: { xs: 1.5, sm: 2 } }}>
@@ -52,17 +42,12 @@ export function ChartPanel({
           <Typography id="chart-heading" variant="h2">
             Price history
           </Typography>
-          <ChartControls
-            chartType={chartType}
-            lineField={lineField}
-            onChartType={onChartType}
-            onLineField={onLineField}
-          />
+          <ChartControls chartType={chartType} onChartType={onChartType} />
         </Stack>
         <Typography variant="body2" color="text.secondary">
           {chartType === 'candles'
             ? 'Candles use open, high, low and close as provided by the dataset; hollow candles closed above their open. Volume is shown below.'
-            : `${LINE_FIELD_LABEL[lineField]} as provided by the dataset${lineField === 'adjClose' ? '; the adjustment method is not stated by the source' : ''}. Volume is shown below.`}
+            : 'Close as provided by the dataset. Volume is shown below.'}
         </Typography>
         {shown && <Legend bar={shown} />}
         <Box sx={{ position: 'relative' }} aria-busy={refreshing}>
@@ -84,7 +69,6 @@ export function ChartPanel({
             <PriceChart
               bars={bars}
               chartType={chartType}
-              lineField={lineField}
               description={description}
               onHover={setHoveredDate}
             />
@@ -125,19 +109,10 @@ function Legend({ bar }: { bar: Bar }) {
 }
 
 /** A short text alternative for the canvas chart. */
-export function describeChart(
-  ticker: string,
-  bars: readonly Bar[],
-  chartType: ChartType,
-  lineField: LineField,
-): string {
+export function describeChart(ticker: string, bars: readonly Bar[], chartType: ChartType): string {
   const first = bars[0];
   const last = bars.at(-1);
   if (!first || !last) return `${ticker}: no prices in the selected range.`;
-  const kind =
-    chartType === 'candles'
-      ? 'Candlestick chart'
-      : `Line chart of ${LINE_FIELD_LABEL[lineField].toLowerCase()}`;
-  const field = chartType === 'candles' ? 'close' : lineField;
-  return `${kind} with volume for ${ticker}, ${String(bars.length)} trading days from ${first.date} to ${last.date}. ${LINE_FIELD_LABEL[field]} went from ${formatDecimal(first[field])} to ${formatDecimal(last[field])}. The price table below lists every value.`;
+  const kind = chartType === 'candles' ? 'Candlestick chart' : 'Line chart of the close';
+  return `${kind} with volume for ${ticker}, ${String(bars.length)} trading days from ${first.date} to ${last.date}. Close went from ${formatDecimal(first.close)} to ${formatDecimal(last.close)}. The price table below lists every value.`;
 }

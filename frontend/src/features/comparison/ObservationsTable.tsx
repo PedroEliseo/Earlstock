@@ -11,8 +11,7 @@ import Typography from '@mui/material/Typography';
 import { useState } from 'react';
 import { formatDecimal, formatIndex, formatInteger } from '../../domain/decimal';
 import { visuallyHidden } from '../../theme/theme';
-import type { ComparisonModel } from './comparisonModel';
-import { BASIS_LABEL } from './ComparisonSummary';
+import { BASIS_LABEL, type ComparisonModel } from './comparisonModel';
 
 /**
  * The aligned observations behind the chart and metrics: common dates only, newest first, in pages.

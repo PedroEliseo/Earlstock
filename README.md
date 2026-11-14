@@ -27,8 +27,8 @@ live prices and no external market-data services. EarlStock is not a trading or 
     by the service, which the browser cannot distinguish from a logo.
 - **Stock detail** (`/stocks/:ticker`): the stock's name and ticker, coverage, the latest daily bar, range presets (1M, 3M, 6M,
   YTD, 1Y, 3Y, 5Y, MAX) anchored to the stock's **last available date** (never today's date), a
-  custom range, a candlestick or line chart (close or adjusted close) with volume, and a paged table
-  of every bar in the range.
+  custom range, a candlestick or line chart (the line shows the close) with volume, and a paged table
+  of every bar in the range (adjusted close included).
 - **Comparison** (`/compare`): two to five stocks on the trading dates **they all have in common**,
   each indexed to 100 on the first common date, with cumulative return, annualized realized
   volatility and maximum drawdown, and a table of the aligned observations. Stocks are picked by
@@ -97,7 +97,7 @@ uses it to guarantee consistency across requests:
 | `theme/` | The single Material UI theme (light and dark color schemes). |
 
 - **Server state** lives in TanStack Query; **view state** (search, sort, range, chart type,
-  selected tickers, price basis) lives in the URL, so every view can be shared, reloaded and reached
+  selected tickers) lives in the URL, so every view can be shared, reloaded and reached
   with the browser's back and forward buttons. There is no global state library.
 - **Requests** are cancelled with `AbortSignal` when they become obsolete (leaving a page, changing a
   selection), and an obsolete response can never overwrite a current one.
@@ -131,8 +131,8 @@ uses it to guarantee consistency across requests:
   missing for any stock is left out for all of them; nothing is filled in or interpolated. The
   comparison range is resolved on the period all stocks cover: the latest first date to the earliest
   last date.
-- **Index.** `price / price on the first common date × 100`, using the same price basis (close or
-  adjusted close) for every stock.
+- **Index.** `close / close on the first common date × 100`, for every stock. All comparison
+  metrics use the close.
 - **Cumulative return.** `(last common price / first common price − 1) × 100`.
 - **Maximum drawdown.** The most negative `price / running peak − 1` over the common dates, the
   baseline included. It is always ≤ 0.

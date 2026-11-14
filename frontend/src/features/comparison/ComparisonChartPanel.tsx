@@ -6,8 +6,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { lazy, Suspense, useState } from 'react';
 import { formatDecimal, formatIndex, formatPercent } from '../../domain/decimal';
-import type { ComparisonModel } from './comparisonModel';
-import { BASIS_LABEL } from './ComparisonSummary';
+import { BASIS_LABEL, type ComparisonModel } from './comparisonModel';
 import { SeriesSwatch } from './SeriesSwatch';
 
 // The chart library is loaded only when a comparison chart is shown.

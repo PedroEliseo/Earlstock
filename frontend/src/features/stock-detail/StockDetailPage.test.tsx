@@ -10,14 +10,9 @@ import { StockDetailPage } from './StockDetailPage';
 
 // The canvas chart is covered by PriceChart.test.tsx; here it is a probe exposing its inputs.
 vi.mock('./chart/PriceChart', () => ({
-  default: (props: {
-    bars: { date: string }[];
-    chartType: string;
-    lineField: string;
-    description: string;
-  }) => (
+  default: (props: { bars: { date: string }[]; chartType: string; description: string }) => (
     <div role="img" aria-label={props.description} data-testid="chart">
-      {`${props.chartType}:${props.lineField}:${String(props.bars.length)}:${props.bars[0]?.date ?? ''}`}
+      {`${props.chartType}:${String(props.bars.length)}:${props.bars[0]?.date ?? ''}`}
     </div>
   ),
 }));
@@ -45,10 +40,10 @@ describe('StockDetailPage', () => {
     expect(latest).toHaveTextContent(formatDecimal(bars.at(-1)?.adjClose ?? ''));
 
     expect(rangeButton('1Y')).toHaveAttribute('aria-pressed', 'true');
-    expect(await chartProbe()).toMatch(new RegExp(`^candles:close:\\d+:${addMonths(last, -12)}$`));
+    expect(await chartProbe()).toMatch(new RegExp(`^candles:\\d+:${addMonths(last, -12)}$`));
   });
 
-  it('switches range, chart type and line value through the URL, one history entry each', async () => {
+  it('switches range and chart type through the URL, one history entry each', async () => {
     const { router } = open('/stocks/AAA');
     await screen.findByTestId('chart');
 
@@ -59,20 +54,23 @@ describe('StockDetailPage', () => {
     expect(router.state.location.search).toBe('?range=YTD');
 
     await userEvent.click(screen.getByRole('button', { name: 'Line' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Adjusted close' }));
-    expect(await chartProbe()).toMatch(/^line:adjClose:/);
-    expect(router.state.location.search).toBe('?range=YTD&chart=line&series=adjClose');
-    expect(screen.getByText(/adjustment method is not stated/)).toBeInTheDocument();
+    expect(await chartProbe()).toMatch(/^line:/);
+    expect(router.state.location.search).toBe('?range=YTD&chart=line');
+    expect(
+      screen.getByText('Close as provided by the dataset. Volume is shown below.'),
+    ).toBeInTheDocument();
+    // The line always shows the close: there is no close / adjusted close choice.
+    expect(screen.queryByRole('button', { name: 'Adjusted close' })).not.toBeInTheDocument();
 
     await router.navigate(-1);
     await waitFor(() => {
-      expect(router.state.location.search).toBe('?range=YTD&chart=line');
+      expect(router.state.location.search).toBe('?range=YTD');
     });
   });
 
   it('restores the view from the URL', async () => {
     open('/stocks/AAA?range=3M&chart=line');
-    expect(await chartProbe()).toMatch(new RegExp(`^line:close:\\d+:${addMonths(last, -3)}$`));
+    expect(await chartProbe()).toMatch(new RegExp(`^line:\\d+:${addMonths(last, -3)}$`));
     expect(rangeButton('3M')).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -81,7 +79,7 @@ describe('StockDetailPage', () => {
     expect(
       await screen.findByText('Some view settings in the address were not recognized'),
     ).toBeInTheDocument();
-    expect(await chartProbe()).toMatch(/^candles:close:/);
+    expect(await chartProbe()).toMatch(/^candles:/);
   });
 
   it('applies a valid custom range and rejects an invalid one', async () => {
@@ -109,7 +107,7 @@ describe('StockDetailPage', () => {
     await userEvent.clear(to);
     await userEvent.type(to, end);
     await userEvent.click(within(form).getByRole('button', { name: 'Apply' }));
-    expect(await chartProbe()).toBe(`candles:close:11:${start}`);
+    expect(await chartProbe()).toBe(`candles:11:${start}`);
     expect(router.state.location.search).toBe(`?range=custom&from=${start}&to=${end}`);
   });
 
