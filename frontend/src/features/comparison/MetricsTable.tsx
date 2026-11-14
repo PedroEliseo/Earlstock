@@ -8,7 +8,11 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import { formatInteger, formatPercent } from '../../domain/decimal';
-import { MIN_OBSERVATIONS_FOR_VOLATILITY, TRADING_DAYS_PER_YEAR } from '../../domain/performance';
+import {
+  MAX_SESSION_GAP_DAYS,
+  MIN_DAILY_RETURNS,
+  TRADING_DAYS_PER_YEAR,
+} from '../../domain/performance';
 import type { ComparisonModel } from './comparisonModel';
 import { BASIS_LABEL } from './ComparisonSummary';
 import { SeriesSwatch } from './SeriesSwatch';
@@ -27,7 +31,8 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
           Performance metrics
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Computed from {BASIS_LABEL[model.basis].toLowerCase()} on the common dates only.
+          Computed from {BASIS_LABEL[model.basis].toLowerCase()}. Cumulative return and drawdown use
+          the common dates; volatility uses each stock’s own daily observations in the same period.
           Historical values describe the past and do not predict future returns.
         </Typography>
       </Box>
@@ -38,6 +43,7 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
               <TableCell>Ticker</TableCell>
               <TableCell align="right">Cumulative return</TableCell>
               <TableCell align="right">Annualized volatility</TableCell>
+              <TableCell align="right">Daily returns used</TableCell>
               <TableCell align="right">Max drawdown</TableCell>
               <TableCell align="right">First common date</TableCell>
               <TableCell align="right">Last common date</TableCell>
@@ -62,7 +68,14 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
                     : formatPercent(stock.cumulativeReturn, { signed: true })}
                 </TableCell>
                 <TableCell align="right">
-                  {stock.volatility === null ? NOT_AVAILABLE : formatPercent(stock.volatility)}
+                  {stock.volatility.value === null
+                    ? NOT_AVAILABLE
+                    : formatPercent(stock.volatility.value)}
+                </TableCell>
+                <TableCell align="right">
+                  {formatInteger(stock.volatility.dailyReturns)}
+                  {stock.volatility.excludedIntervals > 0 &&
+                    ` (${formatInteger(stock.volatility.excludedIntervals)} ${stock.volatility.excludedIntervals === 1 ? 'gap' : 'gaps'} excluded)`}
                 </TableCell>
                 <TableCell align="right">
                   {stock.maxDrawdown === null ? NOT_AVAILABLE : formatPercent(stock.maxDrawdown)}
@@ -92,9 +105,13 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
         </dd>
         <dt>Annualized volatility</dt>
         <dd>
-          Historical realized volatility: sample standard deviation of the returns between
-          consecutive common observations × √{TRADING_DAYS_PER_YEAR}. Not implied volatility and not
-          a forecast. Needs at least {MIN_OBSERVATIONS_FOR_VOLATILITY} observations.
+          Historical realized volatility from each stock’s own daily prices between the first and
+          last common date (not only the common dates): sample standard deviation of returns between
+          consecutive trading sessions × √{TRADING_DAYS_PER_YEAR}. Two observations count as
+          consecutive sessions when none of the selected stocks traded between them and they are at
+          most {MAX_SESSION_GAP_DAYS} calendar days apart; returns across a gap are excluded, never
+          treated as daily. Needs at least {MIN_DAILY_RETURNS} daily returns. Not implied volatility
+          and not a forecast.
         </dd>
         <dt>Max drawdown</dt>
         <dd>

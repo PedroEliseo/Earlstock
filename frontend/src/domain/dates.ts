@@ -73,3 +73,10 @@ export function startOfYear(date: IsoDate): IsoDate {
 
 export const minDate = (a: IsoDate, b: IsoDate): IsoDate => (a < b ? a : b);
 export const maxDate = (a: IsoDate, b: IsoDate): IsoDate => (a > b ? a : b);
+
+/** Whole calendar days from `from` to `to` (negative if `to` is earlier). */
+export function daysBetween(from: IsoDate, to: IsoDate): number {
+  const [fy, fm, fd] = parts(from);
+  const [ty, tm, td] = parts(to);
+  return Math.round((utcDate(ty, tm, td).getTime() - utcDate(fy, fm, fd).getTime()) / 86_400_000);
+}

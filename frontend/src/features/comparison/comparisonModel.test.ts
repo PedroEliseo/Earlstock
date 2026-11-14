@@ -53,8 +53,40 @@ describe('buildComparisonModel', () => {
     expect(one.stocks[0]).toMatchObject({
       normalized: [100],
       cumulativeReturn: null,
-      volatility: null,
+      volatility: { value: null, dailyReturns: 0 },
       maxDrawdown: null,
     });
+  });
+
+  it('computes volatility from each stock’s OWN daily bars in the common period, not the intersection', () => {
+    // 40 consecutive days. AAA has every day; BBB misses day 20, where AAA jumps.
+    const day = (i: number) => daysAgo(200 - i);
+    const make = (i: number, close: string): Bar => ({
+      date: day(i),
+      open: close,
+      high: close,
+      low: close,
+      close,
+      adjClose: close,
+      volume: 1,
+    });
+    const aaaBars = Array.from({ length: 40 }, (_, i) => make(i, i % 2 === 0 ? '100' : '101'));
+    const bbbBars = Array.from({ length: 40 }, (_, i) => i)
+      .filter((i) => i !== 20)
+      .map((i) => make(i, '50'));
+    const model = buildComparisonModel(
+      [
+        { ticker: 'AAA', bars: aaaBars },
+        { ticker: 'BBB', bars: bbbBars },
+      ],
+      'close',
+    );
+    expect(model.dates).toHaveLength(39); // day 20 is not a common date
+    const [aaa, bbb] = model.stocks;
+    // AAA keeps all 39 of its own daily returns (day 19 -> 20 -> 21 included).
+    expect(aaa?.volatility).toMatchObject({ dailyReturns: 39, excludedIntervals: 0 });
+    expect(aaa?.volatility.value).toBeGreaterThan(0);
+    // BBB's 19 -> 21 change spans the session it is missing: excluded, not treated as daily.
+    expect(bbb?.volatility).toMatchObject({ value: 0, dailyReturns: 37, excludedIntervals: 1 });
   });
 });
