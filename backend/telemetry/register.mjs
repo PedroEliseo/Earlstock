@@ -21,6 +21,14 @@ if (endpoint && isMainThread) {
   const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel();
   register('@elastic/opentelemetry-node/hook.mjs', import.meta.url, registerOptions);
 
+  // Defaults for this application; an explicitly set variable still takes precedence.
+  // - router: Express 5 delegates to the `router` package, which would duplicate every Express
+  //   span; dns/net add a span per connection with no diagnostic value here (fs is off in EDOT).
+  // - detectors: local process attributes only, so startup makes no cloud metadata requests.
+  //   `serviceinstance` is required by Kibana's service metrics views.
+  process.env.OTEL_NODE_DISABLED_INSTRUMENTATIONS ??= 'router,dns,net';
+  process.env.OTEL_NODE_RESOURCE_DETECTORS ??= 'env,process,serviceinstance,os,host';
+
   const sdk = startNodeSDK({ elasticSetupShutdownHandlers: false });
   // Read by src/shared/telemetry.ts; absent when telemetry is off.
   globalThis[Symbol.for('earlstock.telemetry')] = { shutdown: () => sdk.shutdown() };
