@@ -129,6 +129,3 @@ export const visuallyHidden: SxProps<Theme> = {
   whiteSpace: 'nowrap',
   border: 0,
 };
-
-/** Numbers and dates: aligned digits. */
-export const numericSx: SxProps<Theme> = { fontVariantNumeric: 'tabular-nums' };

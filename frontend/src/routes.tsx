@@ -1,6 +1,7 @@
 import type { RouteObject } from 'react-router';
 import { Layout } from './components/Layout';
 import { NotFoundPage } from './components/NotFoundPage';
+import { RouteLoading } from './components/RouteLoading';
 import { ExplorerPage } from './features/explorer/ExplorerPage';
 
 /**
@@ -10,6 +11,8 @@ import { ExplorerPage } from './features/explorer/ExplorerPage';
 export const routes: RouteObject[] = [
   {
     element: <Layout />,
+    // Rendered while a lazy route's code loads on a direct page load.
+    HydrateFallback: RouteLoading,
     children: [
       { index: true, element: <ExplorerPage /> },
       {

@@ -1,125 +1,315 @@
 # EarlStock – Historical Stock Market Explorer
 
-EarlStock lets users explore historical daily stock market data: browse stocks, chart price
-movements over a chosen date range, compare stocks and calculate historical performance metrics.
+EarlStock explores historical daily stock prices: browse the stocks of a dataset, inspect one stock's
+price history with interactive charts, and compare the relative performance of several stocks.
 
-Historical data is loaded once from a CSV dataset into PostgreSQL, which is the application's
-source of truth at runtime. The API only ever reads PostgreSQL; it never reads the CSV, and there
-are no live prices or external market data integrations.
+Historical data is loaded from a CSV dataset into PostgreSQL by a command-line importer. PostgreSQL is
+the application's source of truth at runtime: the API only ever reads it, never the CSV. There are no
+live prices and no external market-data services. EarlStock is not a trading or real-time platform.
 
-This repository currently contains the backend API (`backend/`); the React frontend will follow.
+| Part | Path | Stack |
+| ---- | ---- | ----- |
+| Frontend | `frontend/` | React 19, TypeScript, Vite, Material UI, TanStack Query, React Router, lightweight-charts |
+| API | `backend/` | Node.js, Express 5, TypeScript, `pg` (no ORM), zod |
+| Importer | `backend/src/importer/` | Node.js CLI, `csv-parse` |
+| Database | `docker-compose.yml`, `backend/migrations/` | PostgreSQL 18, plain SQL migrations |
 
-> **Status:** the project is being restructured into the historical explorer in small phases. The
-> API is read-only; the stock endpoints documented below are transitional and will be replaced by
-> explorer endpoints (stocks, price history, comparison and metrics) addressed by ticker.
+## Features
+
+- **Explorer** (`/`): every stock of the active dataset with its first and last available date.
+  Case-insensitive ticker search, sorting by ticker or date, pages of 50; search, sort and page live
+  in the URL.
+- **Stock detail** (`/stocks/:ticker`): coverage, the latest daily bar, range presets (1M, 3M, 6M,
+  YTD, 1Y, 3Y, 5Y, MAX) anchored to the stock's **last available date** (never today's date), a
+  custom range, a candlestick or line chart (close or adjusted close) with volume, and a paged table
+  of every bar in the range.
+- **Comparison** (`/compare`): two to five stocks on the trading dates **they all have in common**,
+  each indexed to 100 on the first common date, with cumulative return, annualized realized
+  volatility and maximum drawdown, and a table of the aligned observations.
+
+### The dataset and its limits
+
+- The dataset provides, per ticker and trading day: open, high, low, close, adjusted close and
+  volume. It provides no company names, sectors, currencies or exchange calendar, so EarlStock shows
+  none of them and never displays a currency symbol.
+- `close` and `adj_close` are shown **as provided by the dataset**. The source does not state how
+  the adjusted close was adjusted, so EarlStock makes no claim about it.
+- Stocks can cover different periods. Ranges are always computed from the data actually available,
+  and the interface states when a request was limited to the available history.
+- Prices are exact decimals end to end (see [Numeric values](#numeric-values)).
+
+## Architecture
+
+```
+browser ──► Vite dev server (proxy /api, /health) ──► Express API ──► PostgreSQL ◄── importer CLI
+            React + MUI + TanStack Query               read-only role                 importer role
+```
+
+### Backend
+
+Layered: routes → controllers (input validation with zod, HTTP mapping) → services (rules, e.g. "no
+active dataset") → repositories (SQL) → a small `Database` wrapper over the `pg` pool that names every
+query, logs slow ones and translates driver errors into application errors. Errors reach clients
+only as `{ error: { code, message, details? } }`; SQL, parameters and PostgreSQL details are logged,
+never returned. The API connects with a read-only role and accepts no request bodies.
+
+### Dataset snapshots
+
+Each successful import is one row of `data_imports`; `dataset_snapshot` points at the **active**
+import. Prices are stored once per stock and date, and an import replaces them in a single
+transaction that also moves the pointer, so readers see either the old dataset or the new one,
+never a mixture (see [Replacement and activation](#replacement-and-activation)).
+
+Every API query is a single SQL statement reading only the active import, and every data response
+carries a **`Dataset-Snapshot: <importId>`** header naming the import it came from. The frontend
+uses it to guarantee consistency across requests:
+
+- A view built from several requests (all pages of the stock list, a stock's metadata plus every
+  price page, all stocks of a comparison) is loaded as one operation: every response must carry the
+  same snapshot. If one differs, everything loaded so far is discarded, in-flight sibling requests
+  are cancelled and the operation restarts (at most three attempts, then a recoverable error).
+- The frontend remembers the newest snapshot it has seen. A late response from an older snapshot is
+  discarded rather than displayed. When a newer snapshot appears, cached data from older snapshots is
+  refetched once and a notice tells the user that a new dataset was activated.
+- Snapshot ids are import ids, which only increase, because the importer always activates a newly
+  created import.
+
+### Frontend
+
+`frontend/src/`:
+
+| Folder | Responsibility |
+| ------ | -------------- |
+| `api/` | Typed fetch client, zod response validation, error types and user-facing error text, snapshot coordination (`loadConsistent`). No React. |
+| `domain/` | Pure logic: calendar dates, range presets, exact decimal formatting, ticker parsing, date alignment, performance metrics. No React, no MUI. |
+| `query/` | TanStack Query client and the snapshot provider (invalidation on a newer dataset). |
+| `features/` | `explorer/`, `stock-detail/`, `comparison/`: a page, its query hook and its components. |
+| `components/` | Shared UI (layout, status messages, range controls) and the shared chart lifecycle hook. |
+| `theme/` | The single Material UI theme (light and dark color schemes). |
+
+- **Server state** lives in TanStack Query; **view state** (search, sort, range, chart type,
+  selected tickers, price basis) lives in the URL, so every view can be shared, reloaded and reached
+  with the browser's back and forward buttons. There is no global state library.
+- **Requests** are cancelled with `AbortSignal` when they become obsolete (leaving a page, changing a
+  selection), and an obsolete response can never overwrite a current one.
+- **Charts** use lightweight-charts through one lifecycle hook (`useLightweightChart`): the chart is
+  created once per mount, resized with a `ResizeObserver`, and disposed on unmount, together with
+  its crosshair subscription. Series and data are updated in place, never by re-creating the chart.
+- **Code splitting**: the detail and comparison pages are lazy routes, and the chart library is
+  loaded only with a chart, so the Explorer's initial bundle contains neither.
+- **Errors** are shown with fixed text per error code (`describeError`). Server messages are never
+  displayed.
+- **Accessibility**: skip link, focus moved to the main content after navigation, keyboard-operable
+  controls with visible focus, polite status and assertive error announcements, captioned tables. Every
+  chart has a text description and a table with all its values. Rising and falling candles differ
+  by fill (hollow or filled), and compared series by line pattern as well as color. Light and dark
+  themes meet WCAG AA contrast, and reduced-motion preferences are respected.
+
+### Numeric values
+
+- **Prices** are `NUMERIC(18,6)` in PostgreSQL and travel as **decimal strings** through the API and
+  the frontend. Every displayed price is formatted from its original string (grouping and padding
+  only, never rounding), in the browser's locale.
+- **Volume** is a `BIGINT` limited to 2^53 − 1, so the API can return it as an exact JSON number.
+- **Chart coordinates and metrics** are the only places where prices become JavaScript numbers: the
+  chart needs numbers to draw, and returns, volatility and drawdown are derived percentages shown
+  with two decimals.
+- **Dates** are `YYYY-MM-DD` strings everywhere (no time zone can shift a day).
+
+### Comparison methodology
+
+- **Common dates.** Only dates on which every selected stock has a price are compared. A date
+  missing for any stock is left out for all of them; nothing is filled in or interpolated. The
+  comparison range is resolved on the period all stocks cover: the latest first date to the earliest
+  last date.
+- **Index.** `price / price on the first common date × 100`, using the same price basis (close or
+  adjusted close) for every stock.
+- **Cumulative return.** `(last common price / first common price − 1) × 100`.
+- **Maximum drawdown.** The most negative `price / running peak − 1` over the common dates, the
+  baseline included. It is always ≤ 0.
+- **Annualized volatility.** Historical realized volatility computed from **each stock's own** daily
+  prices between the first and last common date: the sample standard deviation (n − 1) of returns
+  between consecutive trading sessions × √252. It is reported only when there are at least 20 daily
+  returns. It is not implied volatility and not a forecast.
+  - **Limitation:** the dataset has no exchange calendar, so trading sessions are inferred from the
+    data. Two observations are consecutive sessions when no selected stock traded between them and
+    they are at most 5 calendar days apart. Returns across a gap are excluded and counted, never
+    treated as daily. A session missing for **every** selected stock inside an ordinary short gap
+    cannot be detected, and **adding or removing a stock can change another stock's volatility**.
+    The interface states this next to the metric.
 
 ## Getting started
 
-Requirements: Node.js 22.12+, Docker.
+Requirements: Node.js 22.22 or later, Docker.
 
 ```sh
+# 1. Database: start PostgreSQL, create the roles, apply migrations
 cd backend
 cp .env.example .env               # only if you do not have a .env yet
 # Create backend/.env.local with the three role URLs (see "Database roles"), with generated passwords.
 npm install
-npm run db:setup                   # start PostgreSQL, provision roles, apply migrations
-npm run import -- --file ../data/<dataset>.csv   # load the dataset (see "Importing the dataset")
+npm run db:setup
+
+# 2. Data: place the dataset CSV under data/ (see "Dataset files"), then import it
+npm run import -- --file ../data/<dataset>.csv --dry-run
+npm run import -- --file ../data/<dataset>.csv
+
+# 3. API
 npm run dev                        # http://localhost:3000
+
+# 4. Frontend (second terminal)
+cd frontend
+npm install
+npm run dev                        # http://localhost:5173, proxies /api and /health to the API
 ```
 
-## Dataset
+The Vite dev server forwards `/api` and `/health` to `http://localhost:3000`. Set
+`EARLSTOCK_API_URL` to use another API address. The browser therefore talks to a single origin and
+the API needs no CORS configuration. How the built frontend is served in production is not decided
+yet: `npm run build` produces static files in `frontend/dist/`, which any static host or reverse
+proxy can serve if it also routes `/api` to the backend.
+
+### Dataset files
 
 The historical dataset is a CSV file kept under `data/` at the repository root. It is **not
-committed** (git-ignored) until its source and redistribution licence have been verified, so it
-must be placed there manually. It is loaded into PostgreSQL with `npm run import` (see
-[Importing the dataset](#importing-the-dataset)); until then the API answers `503` because no
-dataset is active.
+committed** (git-ignored) until its source and redistribution licence have been verified, so it must
+be placed there manually. Until a dataset is imported, the API answers `503 DATASET_NOT_LOADED` and
+the frontend explains that no dataset is loaded.
 
-## Backend scripts
+## Scripts
+
+**Backend** (`backend/`):
 
 | Script                                   | Purpose                                                               |
 | ---------------------------------------- | --------------------------------------------------------------------- |
-| `npm run dev`                            | Start with hot reload (tsx)                                           |
+| `npm run dev`                            | Start the API with hot reload (tsx)                                   |
 | `npm run build` / `npm start`            | Compile to `dist/` / run the compiled build                           |
 | `npm run import -- --file <csv> [...]`   | Validate and import a dataset CSV (see [Importing the dataset](#importing-the-dataset)) |
+| `npm run db:setup`                       | Start PostgreSQL, provision roles, apply migrations                   |
 | `npm run migrate:up` / `migrate:down`    | Apply all pending migrations / revert the latest one                  |
 | `npm run migrate:create -- <name>`       | Create a new SQL migration in `migrations/`                           |
-| `npm test`                               | Unit + integration tests (see [Testing](#testing))                    |
-| `npm run check`                          | Typecheck, lint, format check and tests — what CI should run          |
-| `npm run lint` / `format` / `typecheck`  | Individual quality checks                                             |
+| `npm test`                               | Unit, HTTP and PostgreSQL integration tests (see [Testing](#testing)) |
+| `npm run check`                          | Typecheck, lint, format check and tests                               |
+
+**Frontend** (`frontend/`):
+
+| Script                                  | Purpose                                                               |
+| --------------------------------------- | --------------------------------------------------------------------- |
+| `npm run dev`                           | Vite dev server with the API proxy                                    |
+| `npm run build` / `npm run preview`     | Typecheck and build to `dist/` / serve the build locally              |
+| `npm test`                              | Unit and component tests (Vitest, React Testing Library, jsdom)       |
+| `npm run check`                         | Typecheck, lint, format check and tests                               |
+| `npm run notices`                       | Regenerate `public/third-party-notices.txt` (also runs before `dev` and `build`) |
 
 ## Configuration
 
-Environment variables are validated at startup; the process exits with a descriptive error if any
-is invalid. Variables the application does not define are ignored. Every npm script loads
-`backend/.env` and then `backend/.env.local` (both git-ignored). See `backend/.env.example`.
+Environment variables are validated at startup, and the process exits with a descriptive error if
+any is invalid. Every backend npm script loads `backend/.env` and then `backend/.env.local` (both
+git-ignored). See `backend/.env.example`.
 
 | Variable                   | Used by                     | Description                                                     |
 | -------------------------- | --------------------------- | --------------------------------------------------------------- |
-| `NODE_ENV`                 | backend                     | `development`, `test` or `production` (default `development`)   |
-| `PORT`                     | backend                     | HTTP port (default `3000`)                                      |
-| `MARKET_DATA_DATABASE_URL` | **backend** (required), provisioning, tests | Read-only API role. The backend has no fallback to any other URL. |
-| `DATABASE_POOL_MAX`        | backend                     | Maximum pooled connections, 1–100 (default `10`)                |
+| `NODE_ENV`                 | API                         | `development`, `test` or `production` (default `development`)   |
+| `PORT`                     | API                         | HTTP port (default `3000`)                                      |
+| `MARKET_DATA_DATABASE_URL` | **API** (required), provisioning, tests | Read-only API role. The API has no fallback to any other URL. |
+| `DATABASE_POOL_MAX`        | API                         | Maximum pooled connections, 1–100 (default `10`)                |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | API                    | Per-statement time limit for the API pool, 100–60000 ms (default `5000`) |
 | `MIGRATION_DATABASE_URL`   | migrations, provisioning, tests | Schema-owner role                                           |
 | `IMPORTER_DATABASE_URL`    | **importer** (required), provisioning, tests | Dataset importer role. The importer has no fallback to any other URL and refuses to run if this URL reuses another role. |
 | `DATABASE_URL`             | safety checks only          | Administrative (superuser) connection to the development database; not used to connect |
 | `TEST_DATABASE_URL`        | test setup                  | Administrative connection to the test database, used only to drop and recreate it; see [Testing](#testing) |
+| `EARLSTOCK_API_URL`        | frontend dev server         | API address for the Vite proxy (default `http://localhost:3000`) |
 
-Credentials live only in git-ignored `.env` files; only `.env.example` is committed. The superuser
+Credentials live only in git-ignored `.env` files, and only `.env.example` is committed. The superuser
 values in it are local Docker Compose defaults for a database bound to localhost. The EarlStock role
 passwords are generated per developer and kept only in `backend/.env.local`.
 
 ## API
 
-All responses are JSON. Successful responses wrap the payload in `data`; errors always use the same
-shape:
+All endpoints are `GET` and read-only. Successful responses are JSON objects with a `data` field.
+
+### Errors
 
 ```json
-{ "error": { "message": "Request validation failed", "details": [{ "path": "id", "message": "Invalid UUID" }] } }
+{ "error": { "code": "VALIDATION_FAILED", "message": "Request validation failed", "details": [{ "path": "limit", "message": "…" }] } }
 ```
 
-`details` is present only for validation errors (HTTP 400).
+| Status | `code` | When |
+| ------ | ------ | ---- |
+| 400 | `VALIDATION_FAILED` | Invalid path or query parameter; `details` lists each problem |
+| 400 | `BAD_REQUEST` | Malformed request |
+| 404 | `NOT_FOUND` | Unknown route, or no such stock in the active dataset |
+| 503 | `DATASET_NOT_LOADED` | No dataset has been imported and activated yet |
+| 503 | `DATABASE_UNAVAILABLE` | The database cannot be reached (with a `Retry-After` header) |
+| 503 | `DATABASE_TIMEOUT` | A query exceeded its time limit |
+| 500 | `INTERNAL` | Anything else; no details are returned |
+
+### Dataset snapshot header
+
+Every successful `/api/stocks…` response carries `Dataset-Snapshot: <importId>`, the import the
+data was read from. Clients combining several responses (pages, or a stock's metadata and prices)
+must check that they all carry the same value, and start again if not.
 
 ### Health
 
-| Method | Path            | Description                                                                 |
-| ------ | --------------- | --------------------------------------------------------------------------- |
-| GET    | `/health`       | Liveness. `200` while the process is serving HTTP; never checks the database. |
-| GET    | `/health/ready` | Readiness. `200 {"status":"ok"}` or `503 {"status":"unavailable"}` depending on database reachability. |
+| Path            | Response |
+| --------------- | -------- |
+| `/health`       | Liveness: `200 { "status": "ok", "uptime": <seconds>, "timestamp": "<ISO 8601>" }` while the process serves HTTP. Never touches the database. |
+| `/health/ready` | Readiness: `200` or `503` with `{ "status": "ok" \| "unavailable", "checks": { "database": "up" \| "down", "dataset": "loaded" \| "empty" \| "unknown", "privileges": "ok" \| "excessive" \| "unknown" } }`. Ready means the database answers, a dataset is active, and the API role has no more privileges than it should. |
 
-### Stocks (transitional)
+### `GET /api/stocks`
 
-Read-only: stock data is written exclusively by the data importer, so there are no create, update
-or delete endpoints. A stock:
+Stocks of the active dataset, ordered by ticker (byte-wise, locale-independent).
+
+| Query param | Default | Constraints    |
+| ----------- | ------- | -------------- |
+| `limit`     | `20`    | integer, 1–100 |
+| `offset`    | `0`     | integer, ≥ 0   |
 
 ```json
 {
-  "id": "01a1d532-0c63-78b9-a7df-5ada06ef20de",
-  "ticker": "BRK.B",
-  "createdAt": "<ISO 8601 timestamp>"
+  "data": [{ "ticker": "BRK.B", "firstDate": "YYYY-MM-DD", "lastDate": "YYYY-MM-DD" }],
+  "pagination": { "limit": 20, "offset": 0, "total": 500 }
 }
 ```
 
-#### `GET /api/stocks`
+### `GET /api/stocks/:ticker`
 
-Lists stocks ordered by `ticker` (byte-wise, independent of locale).
-
-| Query param | Default | Constraints     |
-| ----------- | ------- | --------------- |
-| `limit`     | `20`    | integer, 1–100  |
-| `offset`    | `0`     | integer, ≥ 0    |
-
-`200`:
+A stock's coverage and its latest bar. The ticker is matched case-insensitively. Encode special
+characters in the path (`^GSPC` → `%5EGSPC`). `404` if the active dataset has no such stock.
 
 ```json
-{ "data": [/* stocks */], "pagination": { "limit": 20, "offset": 0, "total": 42 } }
+{
+  "data": {
+    "ticker": "AAPL",
+    "coverage": { "firstDate": "YYYY-MM-DD", "lastDate": "YYYY-MM-DD", "tradingDays": 250 },
+    "latest": { "date": "YYYY-MM-DD", "open": "273.06", "high": "273.68", "low": "271.75",
+                "close": "271.86", "adjClose": "271.122", "volume": 27293600 }
+  }
+}
 ```
 
-`400` for invalid pagination parameters.
+### `GET /api/stocks/:ticker/prices`
 
-#### `GET /api/stocks/:id`
+Daily bars, oldest first, with cursor pagination.
 
-`200 { "data": stock }` · `400` if `id` is not a UUID · `404` if no such stock.
+| Query param | Default | Description |
+| ----------- | ------- | ----------- |
+| `from`      | —       | First date, inclusive (`YYYY-MM-DD`) |
+| `to`        | —       | Last date, inclusive; not earlier than `from` |
+| `after`     | —       | Exclusive cursor: only dates strictly after it; must lie within `[from, to]` |
+| `limit`     | `1000`  | Bars per page, 1–5000 |
+
+```json
+{
+  "data": [{ "date": "YYYY-MM-DD", "open": "…", "high": "…", "low": "…", "close": "…", "adjClose": "…", "volume": 0 }],
+  "page": { "limit": 1000, "nextAfter": "YYYY-MM-DD" }
+}
+```
+
+`nextAfter` is the last date of the page when more bars follow, otherwise `null`. Pass it as `after`
+(with the same `from` and `to`) to get the next page. Prices are decimal strings with trailing zeros
+removed, and `volume` is a JSON number.
 
 ## Database
 
@@ -189,18 +379,6 @@ roles and passwords; the Compose defaults are for local development only.
   `stock_count ≤ price_count ≤ rows_read`. A **running** import has no `finished_at`; a **failed** one
   must have an `error_summary`.
 
-### Numeric values in Node.js
-
-node-postgres returns `NUMERIC` and `BIGINT` as strings, and the code keeps it that way: prices are
-never converted to JavaScript numbers on the server, and `volume` stays a string in the persistence
-and domain layers. If an API response needs `volume` as a JSON number, it is converted at that
-boundary with an explicit safe-integer check. Dates are read as `to_char(trade_date, 'YYYY-MM-DD')`,
-because the default parser turns a `DATE` into a `Date` at local midnight. No global type parsers
-are installed.
-
-Note that `NUMERIC(18,6)` silently **rounds** values with more than 6 decimals, so the importer
-rejects them before inserting.
-
 ### History
 
 - `stocks.id` defaults to `uuidv7()` (native in PostgreSQL 18): time-ordered IDs keep primary-key
@@ -211,6 +389,9 @@ rejects them before inserting.
 - `historical-daily-prices` reshaped `stocks` (dropping `name`, `exchange` and `currency`, which the
   historical dataset does not provide) and created `daily_prices` and `data_imports`. It refuses to
   run while `stocks` has rows, and its rollback refuses to run while any of the three tables has rows.
+- `market-data-permissions` grants the read-only API group its `SELECT` privileges.
+- `dataset-snapshot` adds the `dataset_snapshot` pointer to the active import.
+- `importer-permissions` grants the importer group its write privileges.
 
 ## Importing the dataset
 
@@ -315,8 +496,19 @@ their exclusive locks); PostgreSQL's autovacuum handles it.
 ## Testing
 
 ```sh
-cd backend && npm run db:setup && npm test
+cd backend && npm run db:setup && npm test    # API, importer and PostgreSQL integration tests
+cd frontend && npm test                        # frontend unit and component tests
 ```
+
+**Frontend tests** (`frontend/src/**/*.test.ts(x)`, Vitest with jsdom and React Testing Library) need
+no backend. `fetch` is replaced by an in-memory fake API that sends `Dataset-Snapshot` headers like the
+real one, and `lightweight-charts` by a recording fake, so chart creation, updates, resizing and
+disposal are verified without a canvas. They cover the API client and snapshot coordination
+(restarts, cancellation, stale responses), pagination of lists and price histories, every page's
+states, URL state, ranges, exact formatting, comparison alignment and metrics. Test dates are
+computed relative to the current date and never hard-coded.
+
+**Backend tests:**
 
 - **Unit tests** (`src/**/*.test.ts`, `tests/setup/*.test.ts`) need no database.
 - **HTTP tests** (`tests/*.test.ts`) run the Express app in-process with Supertest.

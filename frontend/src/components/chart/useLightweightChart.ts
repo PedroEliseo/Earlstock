@@ -52,8 +52,10 @@ export function useLightweightChart(
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         fontFamily: 'inherit',
-        // Required TradingView attribution (licence link requirement).
-        attributionLogo: true,
+        // The licence's link requirement is met by the visible "Charts by TradingView Lightweight
+        // Charts" link under every chart (see THIRD_PARTY_NOTICES.md). The on-chart logo is off: it
+        // is a focusable link inside the chart's role="img" container, which is not accessible.
+        attributionLogo: false,
         ...optionsRef.current.layout,
       },
     });

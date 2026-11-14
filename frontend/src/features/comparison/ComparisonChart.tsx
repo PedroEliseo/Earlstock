@@ -1,9 +1,12 @@
 import Box from '@mui/material/Box';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import { type IPriceLine, type ISeriesApi, LineSeries, LineStyle } from 'lightweight-charts';
 import { useEffect, useRef } from 'react';
 import { type SeriesPattern, seriesPattern } from '../../components/chart/seriesStyles';
+import { priceFormat } from '../../components/chart/chartFormat';
 import { useChartColors } from '../../components/chart/useChartColors';
 import { isChartAlive, useLightweightChart } from '../../components/chart/useLightweightChart';
+import { theme } from '../../theme/theme';
 
 const LINE_STYLE: Record<SeriesPattern, LineStyle> = {
   solid: LineStyle.Solid,
@@ -31,6 +34,7 @@ export interface ComparisonChartProps {
  *     dashed reference line at 100; cleanup removes them unless the chart is already gone.
  *  2. data: setData on every series from the same date list, then fitContent.
  *  3. colors: applyOptions when the theme changes.
+ *  4. axis labels: ticker titles on the price axis, hidden on narrow screens.
  */
 export default function ComparisonChart({
   dates,
@@ -54,6 +58,8 @@ export default function ComparisonChart({
   const tickersKey = series.map((s) => s.ticker).join(',');
   const { text, grid } = colors;
   const seriesColors = colors.series.join(',');
+  // On narrow screens the per-series axis labels would squeeze the plot; the legend names them.
+  const compact = useMediaQuery(theme.breakpoints.down('sm'));
 
   // 1. One line series per ticker.
   useEffect(() => {
@@ -65,7 +71,7 @@ export default function ComparisonChart({
         lineWidth: 2,
         lineStyle: LINE_STYLE[seriesPattern(index).pattern],
         priceLineVisible: false,
-        priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+        priceFormat: priceFormat(2),
       }),
     );
     // Neutral reference line at the common baseline (colored by the theme effect, never red/green).
@@ -111,6 +117,14 @@ export default function ComparisonChart({
       line.applyOptions({ color: palette[index % palette.length] ?? text });
     });
   }, [chartRef, tickersKey, text, grid, seriesColors]);
+
+  // 4. Axis labels.
+  useEffect(() => {
+    const tickers = tickersKey.split(',');
+    seriesRef.current.forEach((line, index) => {
+      line.applyOptions({ title: compact ? '' : (tickers[index] ?? '') });
+    });
+  }, [chartRef, tickersKey, compact]);
 
   return (
     <Box

@@ -20,18 +20,18 @@ const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
 /**
  * Application shell: skip link, app bar with navigation, main landmark and footer. After client-side
  * navigation, focus moves to <main> so keyboard and screen-reader users start at the new content
- * (the initial page load keeps the browser's default focus).
+ * (the initial page load keeps the browser's default focus, so the first Tab reaches the skip link).
  */
 export function Layout() {
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
-  const firstRender = useRef(true);
+  // Focus moves only when the path actually changes. Comparing with the previous path (rather than
+  // skipping a "first render") stays correct when effects run twice, as in React Strict Mode.
+  const previousPath = useRef(pathname);
 
   useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
-      return;
-    }
+    if (previousPath.current === pathname) return;
+    previousPath.current = pathname;
     mainRef.current?.focus();
   }, [pathname]);
 
@@ -114,7 +114,10 @@ export function Layout() {
       <Box component="footer" sx={{ borderTop: 1, borderColor: 'divider', py: 2 }}>
         <Container maxWidth="lg">
           <Typography variant="body2" color="text.secondary">
-            Historical daily prices as provided by the imported dataset. Not real-time data.
+            Historical daily prices as provided by the imported dataset. Not real-time data.{' '}
+            <Link href="/third-party-notices.txt" color="inherit">
+              Third-party notices
+            </Link>
           </Typography>
         </Container>
       </Box>

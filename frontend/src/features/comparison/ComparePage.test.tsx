@@ -51,7 +51,9 @@ describe('ComparePage', () => {
     expect(within(metrics).getAllByRole('row')).toHaveLength(3);
     const expected = (Number(aaa.at(-1)?.close) / Number(aaa[180]?.close) - 1) * 100;
     expect(within(metrics).getByRole('rowheader', { name: /AAA/ }).closest('tr')).toHaveTextContent(
-      formatPercent(expected, { signed: true }),
+      // toHaveTextContent collapses the element's whitespace (including the no-break spaces some
+      // locales put in percentages), so the expected text is normalized the same way.
+      formatPercent(expected, { signed: true }).replace(/\s+/g, ' '),
     );
 
     const observations = screen.getByRole('table', { name: 'Aligned observations' });

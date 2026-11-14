@@ -6,3 +6,5 @@ coverage/
 .env
 .env.*
 !.env.example
+# Generated from installed packages by scripts/third-party-notices.mjs (before dev and build).
+public/third-party-notices.txt

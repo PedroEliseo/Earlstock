@@ -7,6 +7,7 @@ import {
 } from 'lightweight-charts';
 import { useEffect, useRef } from 'react';
 import type { Bar } from '../../../api/schemas';
+import { priceFormat, volumeFormat } from '../../../components/chart/chartFormat';
 import { useChartColors } from '../../../components/chart/useChartColors';
 import { isChartAlive, useLightweightChart } from '../../../components/chart/useLightweightChart';
 import type { ChartType, LineField } from '../stockView';
@@ -66,7 +67,7 @@ export default function PriceChart({
     if (!chart) return;
     const series = chart.addSeries(HistogramSeries, {
       priceScaleId: VOLUME_SCALE,
-      priceFormat: { type: 'volume' },
+      priceFormat: volumeFormat(),
       lastValueVisible: false,
       priceLineVisible: false,
     });
@@ -100,9 +101,7 @@ export default function PriceChart({
     const price = priceRef.current;
     if (!chart || !price) return;
     const precision = pricePrecision(bars, drawnFields(chartType, lineField));
-    price.applyOptions({
-      priceFormat: { type: 'price', precision, minMove: 10 ** -precision },
-    });
+    price.applyOptions({ priceFormat: priceFormat(precision) });
     if (chartType === 'candles') {
       (price as ISeriesApi<'Candlestick'>).setData(toCandles(bars));
     } else {

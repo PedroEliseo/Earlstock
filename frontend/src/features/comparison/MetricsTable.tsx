@@ -105,13 +105,15 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
         </dd>
         <dt>Annualized volatility</dt>
         <dd>
-          Historical realized volatility from each stock’s own daily prices between the first and
-          last common date (not only the common dates): sample standard deviation of returns between
-          consecutive trading sessions × √{TRADING_DAYS_PER_YEAR}. Two observations count as
-          consecutive sessions when none of the selected stocks traded between them and they are at
-          most {MAX_SESSION_GAP_DAYS} calendar days apart; returns across a gap are excluded, never
-          treated as daily. Needs at least {MIN_DAILY_RETURNS} daily returns. Not implied volatility
-          and not a forecast.
+          Historical realized volatility of each stock’s own daily returns between the first and
+          last common date, × √{TRADING_DAYS_PER_YEAR}. Not implied volatility and not a forecast;
+          shown only with at least {MIN_DAILY_RETURNS} daily returns.
+        </dd>
+        <dd>
+          Limitation: the dataset has no exchange calendar, so trading sessions are inferred from
+          the selected stocks’ dates. Returns across a gap (a session the stock is missing, or more
+          than {MAX_SESSION_GAP_DAYS} calendar days) are excluded. Adding or removing a stock can
+          therefore change another stock’s volatility.
         </dd>
         <dt>Max drawdown</dt>
         <dd>
