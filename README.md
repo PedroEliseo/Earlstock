@@ -203,7 +203,6 @@ the frontend explains that no dataset is loaded.
 | `npm run build` / `npm run preview`     | Typecheck and build to `dist/` / serve the build locally              |
 | `npm test`                              | Unit and component tests (Vitest, React Testing Library, jsdom)       |
 | `npm run check`                         | Typecheck, lint, format check and tests                               |
-| `npm run notices`                       | Regenerate `public/third-party-notices.txt` (also runs before `dev` and `build`) |
 
 ## Configuration
 

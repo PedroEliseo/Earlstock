@@ -114,10 +114,7 @@ export function Layout() {
       <Box component="footer" sx={{ borderTop: 1, borderColor: 'divider', py: 2 }}>
         <Container maxWidth="lg">
           <Typography variant="body2" color="text.secondary">
-            Historical daily prices as provided by the imported dataset. Not real-time data.{' '}
-            <Link href="/third-party-notices.txt" color="inherit">
-              Third-party notices
-            </Link>
+            Historical daily prices as provided by the imported dataset. Not real-time data.
           </Typography>
         </Container>
       </Box>

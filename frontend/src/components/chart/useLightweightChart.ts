@@ -53,7 +53,7 @@ export function useLightweightChart(
         background: { type: ColorType.Solid, color: 'transparent' },
         fontFamily: 'inherit',
         // The on-chart TradingView logo is off: it is a focusable link inside the chart's
-        // role="img" container, which is not accessible. See THIRD_PARTY_NOTICES.md.
+        // role="img" container, which is not accessible.
         attributionLogo: false,
         ...optionsRef.current.layout,
       },

@@ -26,13 +26,8 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.js', '**/*.mjs'],
+    files: ['**/*.js'],
     extends: [tseslint.configs.disableTypeChecked],
-  },
-  {
-    // Build scripts run in Node, not the browser.
-    files: ['scripts/**/*.mjs'],
-    languageOptions: { globals: globals.node },
   },
   // Must be last: turns off stylistic rules that conflict with Prettier.
   prettier,
