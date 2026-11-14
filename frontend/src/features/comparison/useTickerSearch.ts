@@ -3,6 +3,7 @@ import { loadConsistent } from '../../api/snapshot';
 import { getStockListPage } from '../../api/stocks';
 import { useDebouncedValue } from '../../components/useDebouncedValue';
 import { useSnapshotCoordinator } from '../../query/SnapshotProvider';
+import { withSignal } from '../../query/withSignal';
 
 /** Suggestions shown per search. */
 export const SUGGESTION_LIMIT = 20;
@@ -16,7 +17,7 @@ export function useTickerSearch(input: string) {
   const term = useDebouncedValue(input.trim().toUpperCase(), 250);
   return useQuery({
     queryKey: ['stocks', 'search', term],
-    queryFn: ({ signal }) =>
+    queryFn: withSignal((signal: AbortSignal) =>
       loadConsistent(
         (fetch) =>
           fetch((requestSignal) =>
@@ -27,6 +28,7 @@ export function useTickerSearch(input: string) {
           ),
         { coordinator, signal },
       ),
+    ),
     placeholderData: keepPreviousData,
   });
 }

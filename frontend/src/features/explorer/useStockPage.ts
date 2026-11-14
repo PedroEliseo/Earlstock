@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { loadConsistent } from '../../api/snapshot';
 import { getStockListPage, type SortDirection, type StockSortKey } from '../../api/stocks';
 import { useSnapshotCoordinator } from '../../query/SnapshotProvider';
+import { withSignal } from '../../query/withSignal';
 import { PAGE_SIZE } from './stockListView';
 
 export interface StockPageRequest {
@@ -22,7 +23,7 @@ export function useStockPage({ query, sortKey, sortDirection, page }: StockPageR
   const q = query.trim().toUpperCase();
   return useQuery({
     queryKey: ['stocks', 'page', q, sortKey, sortDirection, page],
-    queryFn: ({ signal }) =>
+    queryFn: withSignal((signal: AbortSignal) =>
       loadConsistent(
         (fetch) =>
           fetch((requestSignal) =>
@@ -39,6 +40,7 @@ export function useStockPage({ query, sortKey, sortDirection, page }: StockPageR
           ),
         { coordinator, signal },
       ),
+    ),
     placeholderData: keepPreviousData,
   });
 }

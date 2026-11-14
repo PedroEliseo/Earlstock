@@ -52,9 +52,8 @@ export function useLightweightChart(
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         fontFamily: 'inherit',
-        // The licence's link requirement is met by the visible "Charts by TradingView Lightweight
-        // Charts" link under every chart (see THIRD_PARTY_NOTICES.md). The on-chart logo is off: it
-        // is a focusable link inside the chart's role="img" container, which is not accessible.
+        // The on-chart TradingView logo is off: it is a focusable link inside the chart's
+        // role="img" container, which is not accessible. See THIRD_PARTY_NOTICES.md.
         attributionLogo: false,
         ...optionsRef.current.layout,
       },

@@ -2,7 +2,9 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { loadConsistent } from '../../api/snapshot';
 import { rangeKey, type RangeRequest } from '../../domain/ranges';
 import { useSnapshotCoordinator } from '../../query/SnapshotProvider';
-import { loadStockView } from './stockView';
+import { withSignal } from '../../query/withSignal';
+import type { Snapshotted } from '../../api/client';
+import { loadStockView, type StockView } from './stockView';
 
 /**
  * One stock's metadata and the bars of the requested range, from one snapshot. Changing the range
@@ -13,8 +15,9 @@ export function useStockView(ticker: string, range: RangeRequest) {
   const coordinator = useSnapshotCoordinator();
   return useQuery({
     queryKey: ['stocks', 'detail', ticker, rangeKey(range)],
-    queryFn: ({ signal }) =>
+    queryFn: withSignal<Snapshotted<StockView>>((signal) =>
       loadConsistent((fetch) => loadStockView(fetch, ticker, range), { coordinator, signal }),
+    ),
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === ticker ? keepPreviousData(previous) : undefined,
   });

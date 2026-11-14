@@ -15,10 +15,11 @@ from its NOTICE file and linking to <https://www.tradingview.com/> on the pages 
   installed version is kept in [`licenses/lightweight-charts.NOTICE`](licenses/lightweight-charts.NOTICE)
   and included in the generated notices together with the full Apache License 2.0 text. When
   upgrading the library, refresh that copy from the matching release tag.
-- **Link:** every chart panel shows a visible "Charts by TradingView Lightweight Charts" link to
-  <https://www.tradingview.com/>. The library's own on-chart logo is disabled (`attributionLogo:
-false`), which the licence allows when the link requirement is met otherwise: the logo is a
-  focusable link inside the chart's `role="img"` container, which is not accessible.
+- **Link:** the application currently shows **no** link to <https://www.tradingview.com/>: the
+  on-chart logo is disabled (it is a focusable link inside the chart's `role="img"` container, which
+  is not accessible) and no text link is displayed, by decision of the project owner. The licence's
+  link requirement is therefore not met by the interface; re-enable `attributionLogo` or add a
+  visible link before distributing the application.
 
 The notice text reproduced verbatim:
 

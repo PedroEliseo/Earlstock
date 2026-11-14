@@ -1,6 +1,5 @@
 import Box from '@mui/material/Box';
 import LinearProgress from '@mui/material/LinearProgress';
-import Link from '@mui/material/Link';
 import Paper from '@mui/material/Paper';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
@@ -95,13 +94,6 @@ export function ComparisonChartPanel({
             />
           </Suspense>
         </Box>
-        <Typography variant="caption" color="text.secondary">
-          Charts by{' '}
-          <Link href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">
-            TradingView Lightweight Charts
-          </Link>
-          . The tables below list every value shown in the chart.
-        </Typography>
       </Stack>
     </Paper>
   );

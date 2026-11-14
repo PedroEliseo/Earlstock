@@ -2,7 +2,9 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { loadConsistent } from '../../api/snapshot';
 import { rangeKey, type RangeRequest } from '../../domain/ranges';
 import { useSnapshotCoordinator } from '../../query/SnapshotProvider';
-import { loadComparison } from './comparisonData';
+import { withSignal } from '../../query/withSignal';
+import type { Snapshotted } from '../../api/client';
+import { type ComparisonData, loadComparison } from './comparisonData';
 import { MIN_TICKERS } from './compareViewState';
 
 /**
@@ -16,8 +18,9 @@ export function useComparison(tickers: readonly string[], range: RangeRequest) {
   const tickersKey = tickers.join(',');
   return useQuery({
     queryKey: ['compare', tickersKey, rangeKey(range)],
-    queryFn: ({ signal }) =>
+    queryFn: withSignal<Snapshotted<ComparisonData>>((signal) =>
       loadConsistent((fetch) => loadComparison(fetch, tickers, range), { coordinator, signal }),
+    ),
     enabled: tickers.length >= MIN_TICKERS,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === tickersKey ? keepPreviousData(previous) : undefined,
