@@ -1,0 +1,34 @@
+import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { StatusMessage } from './StatusMessage';
+
+interface ErrorBoundaryState {
+  failed: boolean;
+}
+
+/**
+ * Last line of defense for rendering bugs: shows a fixed message instead of a blank page. Data
+ * errors are handled by each page's error states; this only catches unexpected exceptions.
+ */
+export class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  override state: ErrorBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): ErrorBoundaryState {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
+    console.error('Unexpected rendering error', error, info.componentStack);
+  }
+
+  override render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <StatusMessage
+        kind="error"
+        title="Something went wrong"
+        description="This page could not be displayed. Reload the page or go back to the explorer."
+        action={<a href="/">Back to the explorer</a>}
+      />
+    );
+  }
+}

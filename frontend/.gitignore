@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.log
+# Environment files may hold local settings; only a documented template would be committed.
+.env
+.env.*
+!.env.example
