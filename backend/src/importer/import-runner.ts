@@ -152,7 +152,13 @@ export async function runImport(
         dryRun: false,
       };
     }
-    log.info('validation passed', { importId, rowsRead, stats: validation.stats, validationMs });
+    log.info('validation passed', {
+      importId,
+      rowsRead,
+      stats: validation.stats,
+      namedStocks: countNamed(validation.names),
+      validationMs,
+    });
 
     const shrinkage = active ? findShrinkage(active.stats, validation.stats) : [];
     if (shrinkage.length > 0 && !options.allowShrink) {
@@ -179,6 +185,7 @@ export async function runImport(
       importId,
       expectedActiveImportId: active?.importId ?? null,
       rows: validation.rows,
+      names: validation.names,
       rowsRead: validation.rowsRead,
       stats: validation.stats,
       ...(options.batchSize === undefined ? {} : { batchSize: options.batchSize }),
@@ -271,6 +278,7 @@ async function dryRun(
     sha256: file.sha256,
     sizeBytes: file.sizeBytes,
     rowsRead: validation.rowsRead,
+    namedStocks: countNamed(validation.names),
     stats: validation.stats,
     active: active
       ? { importId: active.importId, stats: active.stats, sameFile: active.sha256 === file.sha256 }
@@ -291,6 +299,11 @@ async function dryRun(
   }
   log.info('dry run: validation passed; nothing was written', summary);
   return { status: 'dry-run', ...summary };
+}
+
+/** How many tickers of the file come with a name. */
+function countNamed(names: ReadonlyMap<string, string | null>): number {
+  return [...names.values()].filter((name) => name !== null).length;
 }
 
 function shrinkSummary(shrinkage: ShrinkReason[]): string {

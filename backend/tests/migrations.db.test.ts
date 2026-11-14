@@ -21,6 +21,7 @@ const position = (name: string) => {
 };
 const BEFORE_M1 = position('remove-live-ingestion'); // number of migrations preceding M1
 const BEFORE_M2 = position('historical-daily-prices'); // number of migrations preceding M2
+const BEFORE_NAMES = position('stock-names'); // number of migrations preceding stock-names
 
 /** Columns (in order, with type, nullability, default and collation) and constraints of a table. */
 const DEFINITION = `
@@ -166,6 +167,61 @@ describeWithDatabase('migrations (disposable database)', () => {
       expect(await tables()).toEqual(['daily_prices', 'data_imports', 'pgmigrations', 'stocks']);
       expect(await definitionOf('stocks')).toEqual(before);
       expect(await applied()).toBe(BEFORE_M2 + 1);
+    });
+  });
+
+  describe('stock-names', () => {
+    const writerCanUpdate = async (column: string) =>
+      (
+        await sql<{ ok: boolean }>(
+          url,
+          `SELECT has_column_privilege('market_data_writer', 'stocks', $1, 'UPDATE') AS ok`,
+          [column],
+        )
+      )[0]?.ok;
+    const snapshotOfData = async () =>
+      sql(
+        url,
+        `SELECT s.id, s.ticker, d.trade_date::text, d.open::text, d.close::text, d.adj_close::text, d.volume::text
+         FROM stocks s JOIN daily_prices d ON d.stock_id = s.id ORDER BY s.ticker, d.trade_date`,
+      );
+
+    it('adds a nullable name (granted to the importer for UPDATE) and reverts without touching prices', async () => {
+      await migrate(url, 'up', BEFORE_NAMES);
+      const before = await definitionOf('stocks');
+      await sql(url, `INSERT INTO stocks (ticker) VALUES ('AAA')`);
+      await sql(
+        url,
+        `INSERT INTO data_imports (source_file, source_sha256, status, finished_at, error_summary)
+         VALUES ('x.csv', repeat('a', 64), 'failed', now(), 'synthetic')`,
+      );
+      await sql(
+        url,
+        `INSERT INTO daily_prices (stock_id, trade_date, open, high, low, close, adj_close, volume, import_id)
+         SELECT s.id, current_date, 10.5, 11, 10, 10.75, 10.123456, 1000, i.id FROM stocks s, data_imports i`,
+      );
+      const data = await snapshotOfData();
+
+      await migrate(url, 'up', 1);
+      expect(await sql(url, 'SELECT ticker, name FROM stocks')).toEqual([
+        { ticker: 'AAA', name: null },
+      ]);
+      expect(await writerCanUpdate('name')).toBe(true);
+      expect(await writerCanUpdate('ticker')).toBe(false);
+      await sql(url, `UPDATE stocks SET name = 'Alpha'`);
+      expect(await snapshotOfData()).toEqual(data);
+
+      await migrate(url, 'down', 1);
+      expect(await definitionOf('stocks')).toEqual(before);
+      expect(await snapshotOfData()).toEqual(data);
+      expect(
+        (
+          await sql<{ ok: boolean }>(
+            url,
+            `SELECT has_any_column_privilege('market_data_writer', 'stocks', 'UPDATE') AS ok`,
+          )
+        )[0]?.ok,
+      ).toBe(false);
     });
   });
 

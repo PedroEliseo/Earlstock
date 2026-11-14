@@ -32,7 +32,7 @@ describe('TickerPicker', () => {
 
     await userEvent.type(screen.getByRole('combobox', { name: 'Stocks to compare' }), 'zzt');
 
-    const option = await screen.findByRole('option', { name: 'ZZTOP' });
+    const option = await screen.findByRole('option', { name: /^ZZTOP\b/ });
     const terms = fetch.mock.calls.map(([input]) => requestUrl(input).searchParams.get('q'));
     expect(terms).toEqual([null, 'ZZT']); // initial suggestions, then one debounced search
     await userEvent.click(option);
@@ -44,8 +44,31 @@ describe('TickerPicker', () => {
     renderPicker(['AAA']);
     await userEvent.click(screen.getByRole('combobox', { name: 'Stocks to compare' }));
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'BBB' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /^BBB\b/ })).toBeInTheDocument();
     });
-    expect(screen.queryByRole('option', { name: 'AAA' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /^AAA\b/ })).not.toBeInTheDocument();
+  });
+
+  it('shows each suggestion with its name, and finds stocks by name', async () => {
+    const fetch = stubFetch(
+      stockListServer([
+        stock('BRK.B', 400, 1, 'Berkshire Hathaway'),
+        stock('AAPL', 400, 1, 'Apple Inc.'),
+      ]),
+    );
+    renderPicker();
+
+    await userEvent.type(screen.getByRole('combobox', { name: 'Stocks to compare' }), 'hath');
+
+    // The debounced search for "HATH" is sent, then only the matching stock is suggested.
+    await waitFor(() => {
+      expect(
+        fetch.mock.calls.map(([input]) => requestUrl(input).searchParams.get('q')).at(-1),
+      ).toBe('HATH');
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('option', { name: /^AAPL\b/ })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('option', { name: 'BRK.B Berkshire Hathaway' })).toBeInTheDocument();
   });
 });

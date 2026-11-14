@@ -34,6 +34,13 @@ export default tseslint.config(
     files: ['**/*.mjs', '**/*.js'],
     extends: [tseslint.configs.disableTypeChecked],
   },
+  {
+    // Maintenance scripts run in Node.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { process: 'readonly', console: 'readonly', TextDecoder: 'readonly' },
+    },
+  },
   // Must be last: turns off stylistic rules that conflict with Prettier.
   prettier,
 );

@@ -14,8 +14,13 @@ export function daysAgo(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function stock(ticker: string, firstDaysAgo = 400, lastDaysAgo = 1): StockSummary {
-  return { ticker, firstDate: daysAgo(firstDaysAgo), lastDate: daysAgo(lastDaysAgo) };
+export function stock(
+  ticker: string,
+  firstDaysAgo = 400,
+  lastDaysAgo = 1,
+  name: string | null = null,
+): StockSummary {
+  return { ticker, name, firstDate: daysAgo(firstDaysAgo), lastDate: daysAgo(lastDaysAgo) };
 }
 
 /** `count` stocks named T001, T002, … sorted by ticker as the API returns them. */
@@ -42,11 +47,11 @@ export function stockListServer(
     const sort = (url.searchParams.get('sort') ?? 'ticker') as keyof StockSummary;
     const sign = url.searchParams.get('dir') === 'desc' ? -1 : 1;
     const matches = stocks
-      .filter((s) => s.ticker.toUpperCase().includes(q))
+      .filter((s) => s.ticker.toUpperCase().includes(q) || (s.name ?? '').toUpperCase().includes(q))
       .sort((a, b) =>
         sort === 'ticker'
           ? sign * byte(a.ticker, b.ticker)
-          : sign * byte(a[sort], b[sort]) || byte(a.ticker, b.ticker),
+          : sign * byte(String(a[sort]), String(b[sort])) || byte(a.ticker, b.ticker),
       );
     return jsonResponse(
       {
@@ -76,12 +81,17 @@ export function makeBars(count: number, endDaysAgo = 1): Bar[] {
   });
 }
 
-export function detailOf(ticker: string, bars: readonly Bar[]): StockDetail {
+export function detailOf(
+  ticker: string,
+  bars: readonly Bar[],
+  name: string | null = null,
+): StockDetail {
   const first = bars[0];
   const last = bars.at(-1);
   if (!first || !last) throw new Error('a stock needs at least one bar');
   return {
     ticker,
+    name,
     coverage: { firstDate: first.date, lastDate: last.date, tradingDays: bars.length },
     latest: last,
   };
@@ -94,6 +104,7 @@ export function detailOf(ticker: string, bars: readonly Bar[]): StockDetail {
 export function stockServer(
   stocks: Record<string, readonly Bar[]>,
   snapshotFor: (call: number, url: URL) => number = () => 1,
+  names: Record<string, string> = {},
 ): FakeServer {
   let call = 0;
   return (url) => {
@@ -104,7 +115,8 @@ export function stockServer(
     if (!match || !bars) {
       return jsonResponse({ error: { code: 'NOT_FOUND', message: 'nope' } }, { status: 404 });
     }
-    if (!match[2]) return jsonResponse({ data: detailOf(ticker, bars) }, { snapshot });
+    if (!match[2])
+      return jsonResponse({ data: detailOf(ticker, bars, names[ticker] ?? null) }, { snapshot });
     const from = url.searchParams.get('from') ?? '0000-01-01';
     const to = url.searchParams.get('to') ?? '9999-12-31';
     const after = url.searchParams.get('after');
@@ -122,15 +134,17 @@ export function stockServer(
 export function fullServer(
   stocks: Record<string, readonly Bar[]>,
   snapshotFor: (call: number, url: URL) => number = () => 1,
+  names: Record<string, string> = {},
 ): FakeServer {
   const summaries = Object.entries(stocks)
     .map(([ticker, bars]) => ({
       ticker,
+      name: names[ticker] ?? null,
       firstDate: bars[0]?.date ?? '',
       lastDate: bars.at(-1)?.date ?? '',
     }))
     .sort((a, b) => (a.ticker < b.ticker ? -1 : 1));
   const list = stockListServer(summaries);
-  const detail = stockServer(stocks, snapshotFor);
+  const detail = stockServer(stocks, snapshotFor, names);
   return (url, init) => (url.pathname === '/api/stocks' ? list(url, init) : detail(url, init));
 }

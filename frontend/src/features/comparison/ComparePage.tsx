@@ -39,7 +39,12 @@ export function ComparePage() {
 
   // Derived on each render of this page (URL or query changes only). Hovering re-renders just the
   // chart panel, which keeps receiving the same model object, so the chart is not re-fed.
-  const model = result?.range ? buildComparisonModel(result.stocks, basis) : null;
+  const model = result?.range
+    ? buildComparisonModel(
+        result.stocks.map((s) => ({ ticker: s.ticker, name: s.detail.name, bars: s.bars })),
+        basis,
+      )
+    : null;
 
   const change = (changes: {
     tickers?: readonly string[];

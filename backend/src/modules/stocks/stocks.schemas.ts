@@ -21,8 +21,8 @@ export type StockSortKey = (typeof STOCK_SORT_KEYS)[number];
 
 /**
  * Stock list query: pagination plus optional search and order.
- *  - `q`: case-insensitive substring of the ticker (blank = no filter). Matched literally: SQL LIKE
- *    wildcards in it are escaped by the repository.
+ *  - `q`: case-insensitive substring of the ticker OR the name (blank = no filter; at most 100
+ *    characters). Matched literally: SQL LIKE wildcards in it are escaped by the repository.
  *  - `sort` / `dir`: order by ticker, first or last available date; ties are always broken by
  *    ticker ascending, so pages are deterministic.
  */
@@ -31,7 +31,7 @@ export const listStocksQuerySchema = z.strictObject({
   q: z
     .string()
     .trim()
-    .max(32)
+    .max(100)
     .transform((value) => (value === '' ? undefined : value.toUpperCase()))
     .optional(),
   sort: z.enum(STOCK_SORT_KEYS).default('ticker'),

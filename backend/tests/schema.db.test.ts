@@ -204,6 +204,28 @@ describeWithDatabase('historical data model schema (database)', () => {
     });
   });
 
+  describe('stocks.name', () => {
+    const insertNamed = (name: string | null) =>
+      pool.query('INSERT INTO stocks (ticker, name) VALUES ($1, $2)', ['NAMED', name]);
+
+    it.each([
+      null,
+      'Apple Inc.',
+      'Estée Lauder Companies (The)',
+      'x'.repeat(200),
+      '😀'.repeat(200),
+    ])('accepts %j', async (name) => {
+      await expect(insertNamed(name)).resolves.toBeDefined();
+    });
+
+    it.each(['', ' Apple', 'Apple ', 'x'.repeat(201), 'Ap\u0007ple', 'Line\nbreak'])(
+      'rejects %j (stocks_name_format)',
+      async (name) => {
+        await expect(insertNamed(name)).rejects.toMatchObject({ constraint: 'stocks_name_format' });
+      },
+    );
+  });
+
   describe('daily_prices', () => {
     it('accepts a valid bar, including one where open, high, low and close are equal', async () => {
       const { stockId, importId } = await fixture();

@@ -157,4 +157,23 @@ describe('StockDetailPage', () => {
     expect(await screen.findByText('No trading days in the selected range')).toBeInTheDocument();
     expect(screen.queryByTestId('chart')).not.toBeInTheDocument();
   });
+
+  it('leads with the stock name and keeps the ticker visible', async () => {
+    stubFetch(stockServer({ AAPL: bars }, () => 1, { AAPL: 'Apple Inc.' }));
+    renderRoutes(routes, '/stocks/AAPL');
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Apple Inc.' }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('AAPL').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(document.title).toBe('Apple Inc. (AAPL) · EarlStock');
+    });
+  });
+
+  it('uses the ticker as heading and states a missing name, never inventing one', async () => {
+    open('/stocks/AAA');
+    expect(await screen.findByRole('heading', { level: 1, name: 'AAA' })).toBeInTheDocument();
+    expect(screen.getByText('Name not available')).toBeInTheDocument();
+  });
 });

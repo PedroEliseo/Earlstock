@@ -7,6 +7,7 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
+import { StockName } from '../../components/StockName';
 import { formatInteger, formatPercent } from '../../domain/decimal';
 import {
   MAX_SESSION_GAP_DAYS,
@@ -53,7 +54,8 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
           <TableBody>
             {model.stocks.map((stock, index) => (
               <TableRow key={stock.ticker}>
-                <TableCell component="th" scope="row">
+                {/* Wide enough for typical names; the table scrolls on narrow screens. */}
+                <TableCell component="th" scope="row" sx={{ minWidth: '11rem' }}>
                   <Box
                     component="span"
                     sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, fontWeight: 600 }}
@@ -61,6 +63,7 @@ export function MetricsTable({ model }: { model: ComparisonModel }) {
                     <SeriesSwatch index={index} />
                     {stock.ticker}
                   </Box>
+                  <StockName name={stock.name} variant="body2" color="text.secondary" />
                 </TableCell>
                 <TableCell align="right">
                   {stock.cumulativeReturn === null

@@ -69,3 +69,21 @@ export function asDatasetFile(text: string | Buffer, fileName = 'synthetic.csv')
     bytes,
   };
 }
+
+/**
+ * Turns a dataset CSV into the format with a trailing `name` column: every row of a ticker gets
+ * `names[ticker]` (CSV-quoted when needed), or an empty field when the ticker has no entry.
+ */
+export function withNames(csv: string, names: Record<string, string>): string {
+  const quote = (value: string) =>
+    /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+  const lines = csv.split('\n');
+  return lines
+    .map((line, index) => {
+      if (line === '') return line;
+      if (index === 0) return `${line},name`;
+      const ticker = line.split(',')[1] ?? '';
+      return `${line},${quote(names[ticker] ?? '')}`;
+    })
+    .join('\n');
+}

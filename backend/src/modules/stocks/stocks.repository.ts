@@ -15,12 +15,15 @@ export interface DailyBar {
 
 export interface StockSummary {
   ticker: string;
+  /** Human-readable name, or null when the dataset did not provide one (never invented). */
+  name: string | null;
   firstDate: DateString;
   lastDate: DateString;
 }
 
 export interface StockDetail {
   ticker: string;
+  name: string | null;
   coverage: { firstDate: DateString; lastDate: DateString; tradingDays: number };
   latest: DailyBar;
 }
@@ -76,7 +79,7 @@ function listSql(sort: StockSortKey, dir: 'asc' | 'desc'): string {
   return `
   WITH ${ACTIVE},
   listed AS (
-    SELECT st.ticker, c.first_date, c.last_date
+    SELECT st.ticker, st.name, c.first_date, c.last_date
     FROM stocks st
     CROSS JOIN active a
     CROSS JOIN LATERAL (
@@ -84,7 +87,9 @@ function listSql(sort: StockSortKey, dir: 'asc' | 'desc'): string {
       FROM daily_prices d WHERE d.stock_id = st.id AND d.import_id = a.import_id
     ) c
     WHERE c.first_date IS NOT NULL
-      AND ($3::text IS NULL OR st.ticker LIKE '%' || $3::text || '%' ESCAPE '\\')
+      AND ($3::text IS NULL
+           OR st.ticker LIKE '%' || $3::text || '%' ESCAPE '\\'
+           OR upper(st.name) LIKE '%' || $3::text || '%' ESCAPE '\\')
   ),
   page AS (
     SELECT l.*, row_number() OVER (ORDER BY ${order}) AS position
@@ -94,7 +99,7 @@ function listSql(sort: StockSortKey, dir: 'asc' | 'desc'): string {
   )
   SELECT a.import_id AS "importId", a.activated_at AS "activatedAt",
          (SELECT count(*)::int FROM listed) AS "total",
-         p.ticker, to_char(p.first_date, 'YYYY-MM-DD') AS "firstDate",
+         p.ticker, p.name, to_char(p.first_date, 'YYYY-MM-DD') AS "firstDate",
          to_char(p.last_date, 'YYYY-MM-DD') AS "lastDate"
   FROM (SELECT 1) AS sentinel
   LEFT JOIN active a ON true
@@ -116,7 +121,7 @@ function escapeLike(term: string): string {
 
 const DETAIL_SQL = `
   WITH ${ACTIVE},
-  stock AS (SELECT id, ticker FROM stocks WHERE ticker = $1),
+  stock AS (SELECT id, ticker, name FROM stocks WHERE ticker = $1),
   bars AS (
     SELECT d.* FROM daily_prices d
     JOIN stock s ON d.stock_id = s.id
@@ -128,7 +133,7 @@ const DETAIL_SQL = `
   ),
   latest AS (SELECT * FROM bars ORDER BY trade_date DESC LIMIT 1)
   SELECT a.import_id AS "importId", a.activated_at AS "activatedAt",
-         s.ticker,
+         s.ticker, s.name,
          to_char(c.first_date, 'YYYY-MM-DD') AS "firstDate",
          to_char(c.last_date, 'YYYY-MM-DD') AS "lastDate",
          c.trading_days AS "tradingDays",
@@ -181,6 +186,12 @@ function expectMatch(value: unknown, pattern: RegExp, field: string): string {
 
 type BarRow = Record<keyof DailyBar, unknown>;
 
+/** A stored name, or null when none is known. Anything else is a fault (row-shape check). */
+function toName(value: unknown): string | null {
+  if (value === null || typeof value === 'string') return value;
+  throw new Error('unexpected database value for name');
+}
+
 function toDailyBar(row: BarRow): DailyBar {
   return {
     date: expectMatch(row.date, DATE, 'date'),
@@ -206,6 +217,7 @@ export function createStocksRepository(db: Database) {
         SnapshotColumns & {
           total: number | null;
           ticker: string | null;
+          name: unknown;
           firstDate: unknown;
           lastDate: unknown;
         }
@@ -219,6 +231,7 @@ export function createStocksRepository(db: Database) {
         .filter((row) => row.ticker !== null)
         .map((row) => ({
           ticker: String(row.ticker),
+          name: toName(row.name),
           firstDate: expectMatch(row.firstDate, DATE, 'firstDate'),
           lastDate: expectMatch(row.lastDate, DATE, 'lastDate'),
         }));
@@ -231,6 +244,7 @@ export function createStocksRepository(db: Database) {
         SnapshotColumns &
           BarRow & {
             ticker: string | null;
+            name: unknown;
             firstDate: unknown;
             lastDate: unknown;
             tradingDays: number | null;
@@ -242,6 +256,7 @@ export function createStocksRepository(db: Database) {
       }
       const stock: StockDetail = {
         ticker: row.ticker,
+        name: toName(row.name),
         coverage: {
           firstDate: expectMatch(row.firstDate, DATE, 'firstDate'),
           lastDate: expectMatch(row.lastDate, DATE, 'lastDate'),

@@ -1,8 +1,10 @@
+import Chip from '@mui/material/Chip';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import type { StockDetail } from '../../api/schemas';
 import { formatDecimal, formatInteger } from '../../domain/decimal';
+import { StockName } from '../../components/StockName';
 import { ValueList } from '../../components/ValueList';
 
 /**
@@ -14,8 +16,14 @@ export function StockHeader({ detail }: { detail: StockDetail }) {
   return (
     <Stack spacing={2}>
       <div>
-        <Typography variant="h1">{detail.ticker}</Typography>
-        <Typography color="text.secondary">
+        {/* The name leads; the ticker stays visible as the identifier. Without a known name the
+            ticker is the heading and the missing name is stated, never replaced. */}
+        <Typography variant="h1">{detail.name ?? detail.ticker}</Typography>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
+          <Chip label={detail.ticker} size="small" sx={{ fontWeight: 600 }} />
+          {!detail.name && <StockName name={null} variant="body2" component="span" />}
+        </Stack>
+        <Typography color="text.secondary" sx={{ mt: 1 }}>
           Daily prices as provided by the imported dataset.
         </Typography>
       </div>

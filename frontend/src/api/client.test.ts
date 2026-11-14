@@ -6,7 +6,7 @@ import { stockListResponseSchema } from './schemas';
 import { errorResponse, jsonResponse, stubFetch } from '../test/stubFetch';
 
 const list = {
-  data: [{ ticker: 'AAA', firstDate: '0001-01-01', lastDate: '0001-01-02' }],
+  data: [{ ticker: 'AAA', name: null, firstDate: '0001-01-01', lastDate: '0001-01-02' }],
   pagination: { limit: 100, offset: 0, total: 1 },
 };
 

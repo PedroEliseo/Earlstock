@@ -57,7 +57,10 @@ const PRIVILEGES_SQL = `
             WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p')
               AND has_table_privilege(c.oid, 'TRUNCATE, REFERENCES, TRIGGER, MAINTAIN'))
       AS "can_truncate_or_maintain",
-    (has_any_column_privilege('stocks', 'UPDATE') OR has_any_column_privilege('daily_prices', 'UPDATE'))
+    (has_any_column_privilege('daily_prices', 'UPDATE')
+      OR EXISTS (SELECT 1 FROM pg_attribute a
+                 WHERE a.attrelid = 'stocks'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+                   AND a.attname <> 'name' AND has_column_privilege('stocks', a.attnum, 'UPDATE')))
       AS "can_update_prices_or_stocks",
     (has_column_privilege('data_imports', 'id', 'UPDATE')
       OR has_column_privilege('data_imports', 'source_file', 'UPDATE')
@@ -206,6 +209,8 @@ export interface Replacement {
   /** The snapshot import id observed before validation (null: none was active). */
   expectedActiveImportId: number | null;
   rows: readonly PriceRow[];
+  /** Each ticker's name from the file, or null when the file gives none. */
+  names: ReadonlyMap<string, string | null>;
   rowsRead: number;
   stats: DatasetStats;
   batchSize?: number;
@@ -265,12 +270,16 @@ export async function replaceDataset(client: Client, replacement: Replacement): 
       );
     }
 
-    // Stocks are kept by ticker, so ids stay stable across imports; new tickers get new ids.
+    // Stocks are kept by ticker, so ids stay stable across imports; new tickers get new ids. A
+    // name from the file is stored (or updates the stored one); a missing name (null) never erases
+    // a stored name. Inside this transaction, so a failed import leaves names untouched too.
     const tickers = [...new Set(rows.map((row) => row.ticker))].sort();
     await client.query(
-      `INSERT INTO stocks (ticker) SELECT t FROM unnest($1::text[]) AS t ORDER BY t
-       ON CONFLICT (ticker) DO NOTHING`,
-      [tickers],
+      `INSERT INTO stocks (ticker, name)
+       SELECT t.ticker, t.name FROM unnest($1::text[], $2::text[]) AS t(ticker, name) ORDER BY t.ticker
+       ON CONFLICT (ticker) DO UPDATE SET name = EXCLUDED.name
+       WHERE EXCLUDED.name IS NOT NULL AND stocks.name IS DISTINCT FROM EXCLUDED.name`,
+      [tickers, tickers.map((ticker) => replacement.names.get(ticker) ?? null)],
     );
 
     await client.query('DELETE FROM daily_prices');

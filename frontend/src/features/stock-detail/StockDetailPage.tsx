@@ -27,10 +27,11 @@ import { useStockView } from './useStockView';
  */
 export function StockDetailPage() {
   const { ticker = '' } = useParams();
-  usePageTitle(ticker);
   const [params, setParams] = useSearchParams();
   const view = readDetailViewState(params);
   const query = useStockView(ticker, view.range);
+  const loadedName = query.data?.data.detail.name;
+  usePageTitle(loadedName ? `${loadedName} (${ticker})` : ticker);
 
   const change = (changes: {
     range?: RangeRequest;

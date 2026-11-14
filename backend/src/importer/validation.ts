@@ -37,6 +37,11 @@ export interface PriceRow {
   volume: string;
 }
 
+/** Optional last header column: the stock's human-readable name (empty = not known). */
+export const NAME_COLUMN = 'name';
+/** Longest accepted name (also enforced by the stocks_name_format constraint). */
+export const NAME_MAX_LENGTH = 200;
+
 export interface DatasetStats {
   stockCount: number;
   priceCount: number;
@@ -55,7 +60,14 @@ export interface ValidationIssue {
 }
 
 export type ValidationResult =
-  | { ok: true; rowsRead: number; rows: PriceRow[]; stats: DatasetStats }
+  | {
+      ok: true;
+      rowsRead: number;
+      rows: PriceRow[];
+      /** Each ticker's name, or null when the file gives none (always null without a name column). */
+      names: Map<string, string | null>;
+      stats: DatasetStats;
+    }
   | { ok: false; rowsRead: number; issueCount: number; issues: ValidationIssue[] };
 
 export interface ValidationOptions {
@@ -125,6 +137,8 @@ export async function validateDataset(
   }
 
   const rows: PriceRow[] = [];
+  const names = new Map<string, { name: string | null; line: number }>();
+  let hasNames = false;
   const firstLineOf = new Map<string, number>();
   const tickers = new Set<string>();
   const dates = new Set<string>();
@@ -151,21 +165,47 @@ export async function validateDataset(
       const line = info.lines;
       if (!headerSeen) {
         headerSeen = true;
+        hasNames = record.length === EXPECTED_HEADER.length + 1 && record.at(-1) === NAME_COLUMN;
+        const priceColumns = hasNames ? record.slice(0, -1) : record;
         if (
-          record.length !== EXPECTED_HEADER.length ||
-          record.some((name, index) => name !== EXPECTED_HEADER[index])
+          priceColumns.length !== EXPECTED_HEADER.length ||
+          priceColumns.some((name, index) => name !== EXPECTED_HEADER[index])
         ) {
           issues.add({
             line,
-            message: `header must be exactly "${EXPECTED_HEADER.join(',')}"`,
+            message: `header must be exactly "${EXPECTED_HEADER.join(',')}", optionally followed by ",${NAME_COLUMN}"`,
           });
           return reject(0);
         }
         continue;
       }
       rowsRead += 1;
-      const row = validateRecord(record, line, today, issues);
-      if (!row) continue;
+      const expectedFields = EXPECTED_HEADER.length + (hasNames ? 1 : 0);
+      if (record.length !== expectedFields) {
+        issues.add({
+          line,
+          message: `expected ${String(expectedFields)} fields, found ${String(record.length)}`,
+        });
+        continue;
+      }
+      const row = validateRecord(record.slice(0, EXPECTED_HEADER.length), line, today, issues);
+      const name = hasNames
+        ? validateName(record[EXPECTED_HEADER.length] ?? '', line, issues)
+        : null;
+      if (!row || name === undefined) continue;
+
+      // One name per ticker in a file: a different name (or a missing one) on another row is a
+      // conflict, never resolved by picking one.
+      const known = names.get(row.ticker);
+      if (known && known.name !== name) {
+        issues.add({
+          line,
+          column: NAME_COLUMN,
+          message: `conflicts with the name of the same ticker on line ${String(known.line)}`,
+        });
+        continue;
+      }
+      if (!known) names.set(row.ticker, { name, line });
 
       const key = `${row.ticker}\u0000${row.date}`;
       const firstLine = firstLineOf.get(key);
@@ -203,6 +243,7 @@ export async function validateDataset(
     ok: true,
     rowsRead,
     rows,
+    names: new Map([...names].map(([ticker, entry]) => [ticker, entry.name])),
     stats: {
       stockCount: tickers.size,
       priceCount: rows.length,
@@ -211,6 +252,43 @@ export async function validateDataset(
       lastDate: sortedDates.at(-1) ?? '',
     },
   };
+}
+
+/** Length in Unicode code points: what PostgreSQL's char_length counts (the constraint's unit). */
+function codePointLength(value: string): number {
+  let length = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    const unit = value.charCodeAt(i);
+    if (unit >= 0xd800 && unit <= 0xdbff) i += 1; // a surrogate pair is one code point
+    length += 1;
+  }
+  return length;
+}
+
+/**
+ * Validates a name field: empty means "not known" (null). Otherwise it must have no surrounding
+ * whitespace, at most NAME_MAX_LENGTH characters and no control characters. Returns undefined after
+ * reporting a problem. Messages never include the value.
+ */
+function validateName(
+  value: string,
+  line: number,
+  issues: IssueCollector,
+): string | null | undefined {
+  if (value === '') return null;
+  const problem =
+    value.trim() !== value
+      ? 'has leading or trailing whitespace'
+      : codePointLength(value) > NAME_MAX_LENGTH
+        ? `is longer than ${String(NAME_MAX_LENGTH)} characters`
+        : /\p{Cc}/u.test(value)
+          ? 'contains control characters'
+          : null;
+  if (problem) {
+    issues.add({ line, column: NAME_COLUMN, message: problem });
+    return undefined;
+  }
+  return value;
 }
 
 /** Validates one data record; returns the row, or null after reporting every problem in it. */

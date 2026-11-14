@@ -76,7 +76,7 @@ describe('ComparePage', () => {
     await screen.findByTestId('chart');
 
     await userEvent.type(screen.getByRole('combobox', { name: 'Stocks to compare' }), 'CC');
-    await userEvent.click(await screen.findByRole('option', { name: 'CCC' }));
+    await userEvent.click(await screen.findByRole('option', { name: /^CCC\b/ }));
     await waitFor(() => {
       expect(router.state.location.search).toBe('?tickers=AAA%2CBBB%2CCCC');
     });
@@ -142,5 +142,23 @@ describe('ComparePage', () => {
 
     expect(await screen.findByTestId('chart')).toHaveTextContent(/CCC/);
     expect(aborted).toContain('/api/stocks/BBB');
+  });
+
+  it('shows names next to tickers in the legend and the metrics', async () => {
+    open(
+      '?tickers=AAA,BBB',
+      fullServer(stocks, () => 1, { AAA: 'Alpha Corp' }),
+    );
+    await screen.findByTestId('chart');
+
+    const legend = screen.getByRole('list', { name: /Values on/ });
+    expect(legend).toHaveTextContent('AAA');
+    expect(legend).toHaveTextContent('Alpha Corp');
+    const metrics = screen.getByRole('table', { name: 'Performance metrics' });
+    const aaaRow = within(metrics).getByRole('rowheader', { name: /AAA/ });
+    expect(aaaRow).toHaveTextContent('Alpha Corp');
+    expect(within(metrics).getByRole('rowheader', { name: /BBB/ })).toHaveTextContent(
+      'Name not available',
+    );
   });
 });

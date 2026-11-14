@@ -12,6 +12,7 @@ import Paper from '@mui/material/Paper';
 import { Link as RouterLink } from 'react-router';
 import type { StockSummary } from '../../api/schemas';
 import { stockPath } from '../../api/stocks';
+import { StockName } from '../../components/StockName';
 import { visuallyHidden } from '../../theme/theme';
 import type { SortKey, SortOrder } from './stockListView';
 
@@ -47,11 +48,12 @@ export function StockTable({ rows, sort, onSort, loading = false }: StockTablePr
       )}
       <Table size="small" aria-busy={loading} aria-label="Stocks">
         <Box component="caption" sx={visuallyHidden}>
-          Stocks in the active dataset with their first and last available dates, sorted by{' '}
-          {sortedLabel.toLowerCase()} {DIRECTION_TEXT[sort.direction]}.
+          Stocks in the active dataset with their name, ticker and first and last available dates,
+          sorted by {sortedLabel.toLowerCase()} {DIRECTION_TEXT[sort.direction]}.
         </Box>
         <TableHead>
           <TableRow>
+            <TableCell>Name</TableCell>
             {COLUMNS.map((column) => {
               const active = sort.key === column.key;
               return (
@@ -83,6 +85,9 @@ export function StockTable({ rows, sort, onSort, loading = false }: StockTablePr
           {loading
             ? Array.from({ length: SKELETON_ROWS }, (_, index) => (
                 <TableRow key={index} aria-hidden="true">
+                  <TableCell>
+                    <Skeleton variant="text" width="10em" sx={{ display: 'inline-block' }} />
+                  </TableCell>
                   {COLUMNS.map((column) => (
                     <TableCell key={column.key} align={column.numeric ? 'right' : 'left'}>
                       <Skeleton
@@ -96,15 +101,37 @@ export function StockTable({ rows, sort, onSort, loading = false }: StockTablePr
               ))
             : rows.map((stock) => (
                 <TableRow key={stock.ticker} hover>
+                  {/* The name leads; the ticker stays the identifier. The row's link is on the
+                      name when it is known, otherwise on the ticker (never shown as a name). */}
                   <TableCell component="th" scope="row">
-                    <Link
-                      component={RouterLink}
-                      to={stockPath(stock.ticker)}
-                      underline="hover"
-                      sx={{ fontWeight: 600 }}
-                    >
-                      {stock.ticker}
-                    </Link>
+                    {stock.name ? (
+                      <Link
+                        component={RouterLink}
+                        to={stockPath(stock.ticker)}
+                        underline="hover"
+                        sx={{ fontWeight: 600 }}
+                      >
+                        {stock.name}
+                      </Link>
+                    ) : (
+                      <StockName name={null} variant="body2" component="span" />
+                    )}
+                  </TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                    {stock.name ? (
+                      <Box component="span" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                        {stock.ticker}
+                      </Box>
+                    ) : (
+                      <Link
+                        component={RouterLink}
+                        to={stockPath(stock.ticker)}
+                        underline="hover"
+                        sx={{ fontWeight: 600 }}
+                      >
+                        {stock.ticker}
+                      </Link>
+                    )}
                   </TableCell>
                   <TableCell align="right">{stock.firstDate}</TableCell>
                   <TableCell align="right">{stock.lastDate}</TableCell>

@@ -67,7 +67,13 @@ export function ComparisonChartPanel({
               sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}
             >
               <SeriesSwatch index={i} />
-              <strong>{stock.ticker}</strong> {formatIndex(stock.normalized[index] ?? Number.NaN)}
+              <strong>{stock.ticker}</strong>
+              {stock.name && (
+                <Box component="span" sx={{ color: 'text.secondary' }}>
+                  {stock.name}
+                </Box>
+              )}{' '}
+              {formatIndex(stock.normalized[index] ?? Number.NaN)}
               <Box component="span" sx={{ color: 'text.secondary' }}>
                 ({formatDecimal(stock.prices[index] ?? '0')})
               </Box>

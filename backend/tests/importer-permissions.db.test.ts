@@ -113,7 +113,7 @@ describeWithDatabase('importer role permissions', () => {
     ]);
   });
 
-  it('can UPDATE only the status/result columns of data_imports and the pointer columns of dataset_snapshot', async () => {
+  it('can UPDATE only stocks.name, the status/result columns of data_imports and the pointer columns of dataset_snapshot', async () => {
     const { rows } = await importer.query<{ table: string; columns: string[] }>(
       `SELECT c.relname AS "table",
               ARRAY(SELECT a.attname::text FROM pg_attribute a
@@ -138,7 +138,7 @@ describeWithDatabase('importer role permissions', () => {
       },
       { table: 'dataset_snapshot', columns: ['import_id', 'activated_at'] },
       { table: 'pgmigrations', columns: [] },
-      { table: 'stocks', columns: [] },
+      { table: 'stocks', columns: ['name'] },
     ]);
   });
 
@@ -171,7 +171,8 @@ describeWithDatabase('importer role permissions', () => {
       expect(
         await inRolledBackTransaction(
           `SELECT import_id FROM dataset_snapshot FOR UPDATE`,
-          `INSERT INTO stocks (ticker) VALUES ('NEW') ON CONFLICT (ticker) DO NOTHING`,
+          `INSERT INTO stocks (ticker, name) VALUES ('NEW', 'Newco')
+           ON CONFLICT (ticker) DO UPDATE SET name = EXCLUDED.name WHERE EXCLUDED.name IS NOT NULL`,
           `DELETE FROM daily_prices`,
           `INSERT INTO data_imports (source_file, source_sha256, status) VALUES ('probe.csv', repeat('c', 64), 'running')`,
           `INSERT INTO daily_prices (stock_id, trade_date, open, high, low, close, adj_close, volume, import_id)
@@ -202,6 +203,8 @@ describeWithDatabase('importer role permissions', () => {
   describe('refused', () => {
     it.each([
       `UPDATE stocks SET ticker = ticker`,
+      `UPDATE stocks SET id = id`,
+      `UPDATE stocks SET created_at = created_at`,
       `UPDATE daily_prices SET volume = volume`,
       `UPDATE daily_prices SET import_id = import_id`,
       `UPDATE data_imports SET source_sha256 = source_sha256`,

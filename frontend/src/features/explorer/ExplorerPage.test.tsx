@@ -17,10 +17,12 @@ const routes = [
   { path: '/stocks/:ticker', element: <TickerProbe /> },
 ];
 
+/** The Ticker column of the visible rows (the row header is the name). */
 const tickersShown = () =>
   within(screen.getByRole('table', { name: 'Stocks' }))
-    .getAllByRole('rowheader')
-    .map((cell) => cell.textContent);
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => within(row).getAllByRole('cell')[0]?.textContent);
 const queriesOf = (fetch: ReturnType<typeof stubFetch>) =>
   fetch.mock.calls.map(([input]) => Object.fromEntries(requestUrl(input).searchParams));
 
@@ -54,7 +56,10 @@ describe('ExplorerPage', () => {
     const { router } = renderRoutes(routes, '/?page=2');
     await screen.findByRole('link', { name: 'T051' });
 
-    await userEvent.type(screen.getByRole('searchbox', { name: 'Search tickers' }), 'zzt');
+    await userEvent.type(
+      screen.getByRole('searchbox', { name: 'Search by name or ticker' }),
+      'zzt',
+    );
 
     await waitFor(() => {
       expect(tickersShown()).toEqual(['ZZTOP']);
@@ -71,7 +76,7 @@ describe('ExplorerPage', () => {
     await screen.findByRole('link', { name: 'T001' });
     await userEvent.click(screen.getByRole('button', { name: 'Go to page 2' }));
     await screen.findByRole('link', { name: 'T051' });
-    await userEvent.type(screen.getByRole('searchbox', { name: 'Search tickers' }), 'zz');
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search by name or ticker' }), 'zz');
     await waitFor(() => {
       expect(router.state.location.search).toBe('?q=zz');
     });
@@ -82,7 +87,7 @@ describe('ExplorerPage', () => {
     // Well past the debounce delay: the URL and the box stay on the restored view.
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(router.state.location.search).toBe('');
-    expect(screen.getByRole('searchbox', { name: 'Search tickers' })).toHaveValue('');
+    expect(screen.getByRole('searchbox', { name: 'Search by name or ticker' })).toHaveValue('');
   });
 
   it('shows a no-results state with a way to clear the search', async () => {
@@ -168,5 +173,40 @@ describe('ExplorerPage', () => {
 
     expect(await screen.findByText('Detail for ^GSPC')).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/stocks/%5EGSPC');
+  });
+
+  it('shows names prominently with the ticker beside them, and says when a name is unknown', async () => {
+    stubFetch(stockListServer([stock('AAPL', 400, 1, 'Apple Inc.'), stock('ZZZ')]));
+    renderRoutes(routes);
+
+    const named = await screen.findByRole('link', { name: 'Apple Inc.' });
+    expect(named).toHaveAttribute('href', '/stocks/AAPL');
+    expect(tickersShown()).toEqual(['AAPL', 'ZZZ']);
+    const unnamedRow = screen.getByRole('rowheader', { name: 'Name not available' }).closest('tr');
+    expect(unnamedRow && within(unnamedRow).getByRole('link', { name: 'ZZZ' })).toHaveAttribute(
+      'href',
+      '/stocks/ZZZ',
+    );
+    expect(screen.queryByRole('link', { name: 'Name not available' })).not.toBeInTheDocument();
+  });
+
+  it('searches names as well as tickers', async () => {
+    const fetch = stubFetch(
+      stockListServer([
+        stock('AAPL', 400, 1, 'Apple Inc.'),
+        stock('BRK.B', 400, 1, 'Berkshire Hathaway'),
+      ]),
+    );
+    renderRoutes(routes);
+    await screen.findByRole('link', { name: 'Apple Inc.' });
+
+    await userEvent.type(
+      screen.getByRole('searchbox', { name: 'Search by name or ticker' }),
+      'hathaway',
+    );
+
+    expect(await screen.findByText('1 stock match “hathaway”')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Berkshire Hathaway' })).toBeInTheDocument();
+    expect(queriesOf(fetch).at(-1)).toMatchObject({ q: 'HATHAWAY' });
   });
 });

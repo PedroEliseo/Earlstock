@@ -10,6 +10,8 @@ import {
 
 export interface ComparedStock {
   ticker: string;
+  /** Name from the stock's metadata (same snapshot), or null when the dataset has none. */
+  name: string | null;
   /** Exact source prices on the common dates (for display). */
   prices: string[];
   /** Index values, 100 on the first common date (for the chart). */
@@ -36,7 +38,7 @@ export interface ComparisonModel {
  * index values.
  */
 export function buildComparisonModel(
-  stocks: readonly { ticker: string; bars: readonly Bar[] }[],
+  stocks: readonly { ticker: string; name?: string | null; bars: readonly Bar[] }[],
   basis: PriceBasis,
 ): ComparisonModel {
   const alignment = alignOnCommonDates(stocks, basis);
@@ -48,11 +50,13 @@ export function buildComparisonModel(
       : bars.filter((bar) => bar.date >= first && bar.date <= last);
   const calendar = sessionCalendar(stocks.map(({ bars }) => inPeriod(bars).map((bar) => bar.date)));
   const ownBars = new Map(stocks.map(({ ticker, bars }) => [ticker, inPeriod(bars)] as const));
+  const names = new Map(stocks.map(({ ticker, name }) => [ticker, name ?? null] as const));
   return {
     basis,
     dates: alignment.dates,
     stocks: alignment.series.map(({ ticker, prices, values }) => ({
       ticker,
+      name: names.get(ticker) ?? null,
       prices,
       normalized: normalizeTo100(values),
       cumulativeReturn: cumulativeReturn(values),

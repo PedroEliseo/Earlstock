@@ -17,6 +17,7 @@ const bar = (date: string): DailyBar => ({
 
 const detail: StockDetail = {
   ticker: 'AAPL',
+  name: 'Apple Inc.',
   coverage: { firstDate: 'D1', lastDate: 'D3', tradingDays: 3 },
   latest: bar('D3'),
 };

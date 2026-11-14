@@ -26,8 +26,12 @@ export const barSchema = z.object({
   volume: nonNegativeInteger,
 });
 
+/** A stock's human-readable name, or null when the dataset does not provide one. */
+const stockName = z.nullable(z.string().check(z.minLength(1)));
+
 export const stockSummarySchema = z.object({
   ticker: z.string().check(z.minLength(1)),
+  name: stockName,
   firstDate: dateString,
   lastDate: dateString,
 });
@@ -44,6 +48,7 @@ export const stockListResponseSchema = z.object({
 export const stockDetailResponseSchema = z.object({
   data: z.object({
     ticker: z.string().check(z.minLength(1)),
+    name: stockName,
     coverage: z.object({
       firstDate: dateString,
       lastDate: dateString,

@@ -86,6 +86,7 @@ describeWithDatabase('stocks API (database, API role)', () => {
       expect((res.body as { data: unknown[] }).data).toEqual(
         ['B', 'BF.B', 'BFA', '^GSPC'].map((ticker) => ({
           ticker,
+          name: null,
           firstDate: bars[ticker]?.at(0)?.date,
           lastDate: bars[ticker]?.at(-1)?.date,
         })),
@@ -163,6 +164,49 @@ describeWithDatabase('stocks API (database, API role)', () => {
       },
     );
 
+    it('returns stored names (null when unknown) and searches them case-insensitively', async () => {
+      await seedActiveDataset(
+        fixtures,
+        ['AAPL', 'BRK.B', 'EL', 'MSFT'].map((ticker) => ({ ticker, days: 1 })),
+      );
+      await fixtures.query(
+        `UPDATE stocks SET name = v.name FROM (VALUES ('AAPL', 'Apple Inc.'), ('BRK.B', 'Berkshire Hathaway'),
+           ('EL', 'Estée Lauder Companies (The)')) AS v(ticker, name) WHERE stocks.ticker = v.ticker`,
+      );
+
+      const all = await request(app).get('/api/stocks');
+      const byName = await request(app).get('/api/stocks?q=hathaway');
+      const accented = await request(app).get(`/api/stocks?q=${encodeURIComponent('estée')}`);
+      const tickerOrName = await request(app).get('/api/stocks?q=a');
+      const literal = await request(app).get('/api/stocks?q=%25');
+
+      expect(
+        (all.body as { data: { ticker: string; name: string | null }[] }).data.map((s) => [
+          s.ticker,
+          s.name,
+        ]),
+      ).toEqual([
+        ['AAPL', 'Apple Inc.'],
+        ['BRK.B', 'Berkshire Hathaway'],
+        ['EL', 'Estée Lauder Companies (The)'],
+        ['MSFT', null],
+      ]);
+      expect(tickersOf(byName)).toEqual(['BRK.B']);
+      expect(tickersOf(accented)).toEqual(['EL']);
+      expect(tickersOf(tickerOrName)).toEqual(['AAPL', 'BRK.B', 'EL']); // ticker or name contains "A"
+      expect(tickersOf(literal)).toEqual([]);
+    });
+
+    it('returns the name with the stock detail', async () => {
+      await seedActiveDataset(fixtures, [{ ticker: 'AAPL', days: 2 }]);
+      await fixtures.query(`UPDATE stocks SET name = 'Apple Inc.' WHERE ticker = 'AAPL'`);
+      const res = await request(app).get('/api/stocks/AAPL');
+      expect((res.body as { data: { ticker: string; name: string } }).data).toMatchObject({
+        ticker: 'AAPL',
+        name: 'Apple Inc.',
+      });
+    });
+
     it('orders by first or last date in both directions, ties broken by ticker ascending', async () => {
       await seedActiveDataset(fixtures, [
         { ticker: 'CCC', days: 10, endOffset: 0 }, // first date: day -9
@@ -195,6 +239,7 @@ describeWithDatabase('stocks API (database, API role)', () => {
       expect(res.body).toEqual({
         data: {
           ticker: 'AAPL',
+          name: null,
           coverage: { firstDate: aapl.at(0)?.date, lastDate: aapl.at(-1)?.date, tradingDays: 4 },
           latest: toApiBar(aapl.at(-1) as FixtureBar),
         },

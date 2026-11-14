@@ -16,23 +16,26 @@ live prices and no external market-data services. EarlStock is not a trading or 
 
 ## Features
 
-- **Explorer** (`/`): every stock of the active dataset with its first and last available date.
-  Case-insensitive ticker search, sorting by ticker or date, pages of 50; search, sort and page live
+- **Explorer** (`/`): every stock of the active dataset with its name, ticker and first and last
+  available date. Case-insensitive search by name or ticker, sorting by ticker or date, pages of 50; search, sort and page live
   in the URL. The API searches, sorts and pages, so each view is a single request for the 50 rows
   shown.
-- **Stock detail** (`/stocks/:ticker`): coverage, the latest daily bar, range presets (1M, 3M, 6M,
+- **Stock detail** (`/stocks/:ticker`): the stock's name and ticker, coverage, the latest daily bar, range presets (1M, 3M, 6M,
   YTD, 1Y, 3Y, 5Y, MAX) anchored to the stock's **last available date** (never today's date), a
   custom range, a candlestick or line chart (close or adjusted close) with volume, and a paged table
   of every bar in the range.
 - **Comparison** (`/compare`): two to five stocks on the trading dates **they all have in common**,
   each indexed to 100 on the first common date, with cumulative return, annualized realized
-  volatility and maximum drawdown, and a table of the aligned observations.
+  volatility and maximum drawdown, and a table of the aligned observations. Stocks are picked by
+  name or ticker and shown with both; the ticker remains the identifier.
 
 ### The dataset and its limits
 
 - The dataset provides, per ticker and trading day: open, high, low, close, adjusted close and
-  volume. It provides no company names, sectors, currencies or exchange calendar, so EarlStock shows
-  none of them and never displays a currency symbol.
+  volume, and optionally a name per ticker (see [Stock names](#stock-names)). It provides no sectors,
+  currencies or exchange calendar, so EarlStock shows none of them and never displays a currency
+  symbol. A stock without a known name is shown as "Name not available", never under an invented
+  name.
 - `close` and `adj_close` are shown **as provided by the dataset**. The source does not state how
   the adjusted close was adjusted, so EarlStock makes no claim about it.
 - Stocks can cover different periods. Ranges are always computed from the data actually available,
@@ -266,7 +269,7 @@ Stocks of the active dataset, searched, ordered and paged by the database.
 | ----------- | -------- | --------------------- |
 | `limit`     | `20`     | integer, 1–100 |
 | `offset`    | `0`      | integer, ≥ 0 |
-| `q`         | —        | Case-insensitive ticker substring, at most 32 characters; blank means no filter. Matched literally (`%` and `_` are not wildcards). |
+| `q`         | —        | Case-insensitive substring of the ticker **or the name**, at most 100 characters; blank means no filter. Matched literally (`%` and `_` are not wildcards). |
 | `sort`      | `ticker` | `ticker`, `firstDate` or `lastDate` |
 | `dir`       | `asc`    | `asc` or `desc`; ties are always broken by ticker ascending, so pages are deterministic |
 
@@ -276,20 +279,21 @@ come from two index probes on the `(stock_id, trade_date)` primary key.
 
 ```json
 {
-  "data": [{ "ticker": "BRK.B", "firstDate": "YYYY-MM-DD", "lastDate": "YYYY-MM-DD" }],
+  "data": [{ "ticker": "BRK.B", "name": "Berkshire Hathaway", "firstDate": "YYYY-MM-DD", "lastDate": "YYYY-MM-DD" }],
   "pagination": { "limit": 20, "offset": 0, "total": 500 }
 }
 ```
 
 ### `GET /api/stocks/:ticker`
 
-A stock's coverage and its latest bar. The ticker is matched case-insensitively. Encode special
+A stock's name, coverage and latest bar. The ticker is matched case-insensitively. Encode special
 characters in the path (`^GSPC` → `%5EGSPC`). `404` if the active dataset has no such stock.
 
 ```json
 {
   "data": {
     "ticker": "AAPL",
+    "name": "Apple Inc.",
     "coverage": { "firstDate": "YYYY-MM-DD", "lastDate": "YYYY-MM-DD", "tradingDays": 250 },
     "latest": { "date": "YYYY-MM-DD", "open": "273.06", "high": "273.68", "low": "271.75",
                 "close": "271.86", "adjClose": "271.122", "volume": 27293600 }
@@ -336,8 +340,8 @@ migrations.
 | `earlstock_owner`    | login            | Owns the database and every object in it; runs DDL. Not superuser; cannot create roles or databases. | migrations (`MIGRATION_DATABASE_URL`) |
 | `market_data_reader` | group (no login) | `CONNECT`, `USAGE` on schema `public`, `SELECT` on `stocks`, `daily_prices`, `data_imports`, `dataset_snapshot` (granted by migrations) | — |
 | `earlstock_api`      | login            | Member of `market_data_reader` only; sessions start read-only. Owns nothing; cannot write, change the schema, read migration history or use sequences. | backend (`MARKET_DATA_DATABASE_URL`) |
-| `market_data_writer` | group (no login) | `CONNECT`, `USAGE` on `public`; `SELECT, INSERT, DELETE` on `stocks` and `daily_prices`; `SELECT, INSERT` and column-limited `UPDATE` on `data_imports` (status and result columns) and `dataset_snapshot` (`import_id`, `activated_at`) (granted by migration `importer-permissions`) | — |
-| `earlstock_importer` | login            | Member of `market_data_writer` only. Owns nothing; no `UPDATE` of prices or stocks, no `TRUNCATE`, no `DELETE` of import history or of the snapshot pointer, no DDL, no sequences, no migration history, no administrative operations. | importer (`IMPORTER_DATABASE_URL`) |
+| `market_data_writer` | group (no login) | `CONNECT`, `USAGE` on `public`; `SELECT, INSERT, DELETE` on `stocks` and `daily_prices`; `UPDATE` of `stocks.name` only; `SELECT, INSERT` and column-limited `UPDATE` on `data_imports` (status and result columns) and `dataset_snapshot` (`import_id`, `activated_at`) (granted by migrations `importer-permissions` and `stock-names`) | — |
+| `earlstock_importer` | login            | Member of `market_data_writer` only. Owns nothing; no `UPDATE` of prices, of tickers or of stock ids (only of `stocks.name`), no `TRUNCATE`, no `DELETE` of import history or of the snapshot pointer, no DDL, no sequences, no migration history, no administrative operations. | importer (`IMPORTER_DATABASE_URL`) |
 | superuser (`POSTGRES_USER`) | login     | Everything                                                              | only provisioning and creating/dropping test databases |
 
 - **Grants are explicit** per table, in migrations; there are no default privileges, so a new table
@@ -365,7 +369,7 @@ roles and passwords; the Compose defaults are for local development only.
 
 | Table          | Purpose                                                                             |
 | -------------- | ----------------------------------------------------------------------------------- |
-| `stocks`       | One row per instrument: internal `id` (UUIDv7, generated by PostgreSQL) and a unique `ticker` |
+| `stocks`       | One row per instrument: internal `id` (UUIDv7, generated by PostgreSQL), a unique `ticker` and an optional `name` (NULL when unknown; 1–200 characters without surrounding whitespace or control characters) |
 | `daily_prices` | One row per stock and trading date: `open`, `high`, `low`, `close`, `adj_close`, `volume`, and the `import_id` that wrote it |
 | `data_imports` | One row per import attempt: source file name, SHA-256, status, timestamps and statistics |
 
@@ -403,6 +407,9 @@ roles and passwords; the Compose defaults are for local development only.
 - `market-data-permissions` grants the read-only API group its `SELECT` privileges.
 - `dataset-snapshot` adds the `dataset_snapshot` pointer to the active import.
 - `importer-permissions` grants the importer group its write privileges.
+- `stock-names` adds the nullable `stocks.name` (with its format constraint) and grants the importer
+  group `UPDATE` of that column only. Its rollback revokes the grant and drops the column, discarding
+  stored names (they are reproducible from the dataset) and leaving prices untouched.
 
 ## Importing the dataset
 
@@ -439,8 +446,12 @@ file. Nothing is trimmed, normalized, rounded or guessed.
 - At most 64 MiB, read once: the SHA-256 recorded in `data_imports` is computed over exactly the
   bytes that are validated and imported. Strict UTF-8 (a leading byte-order mark is ignored); `LF`
   or `CRLF` line endings; RFC 4180 quoting via `csv-parse`.
-- Header exactly `date,ticker,open,high,low,close,adj_close,volume`, in that order. Every row has 8
-  fields; no field may be empty or have surrounding whitespace.
+- Header exactly `date,ticker,open,high,low,close,adj_close,volume`, in that order, optionally
+  followed by `name`. Every row has 8 fields (9 with `name`); no price field may be empty or have
+  surrounding whitespace.
+- `name` (optional column): the stock's name, repeated on each of its rows. Empty means unknown.
+  Otherwise at most 200 characters, no surrounding whitespace, no control characters. Every row of a
+  ticker must carry the same value (a different or missing name on another row rejects the file).
 - `date`: `YYYY-MM-DD`, a real calendar day. **Future-date rule:** a date later than the execution
   date in UTC is rejected (the execution date itself is accepted). The result therefore depends on
   when the importer runs; a file dated "today" in a time zone ahead of UTC could be rejected until
@@ -458,6 +469,32 @@ file. Nothing is trimmed, normalized, rounded or guessed.
 - **Duplicates:** any repeated `(ticker, date)` rejects the file, including exact duplicate rows.
   No winner is ever chosen.
 - An empty or header-only file is rejected.
+
+### Stock names
+
+Names are stored on `stocks` and written by the importer in the same transaction as the prices:
+
+- A name in the file is stored, or replaces a different stored name.
+- A missing name (file without the `name` column, or an empty field) **never erases** a stored
+  name, so importing price-only data keeps the names already known.
+- A failed or rejected import changes no name.
+
+The enriched dataset is produced reproducibly from the original CSV, which is never modified:
+
+```sh
+# From the repository root. 1. Download the S&P 500 constituents table (raw wikitext).
+curl -fsSL "https://en.wikipedia.org/w/index.php?title=List_of_S%26P_500_companies&action=raw" \
+  -o data/sp500-constituents.wikitext
+# 2. Write a NEW file with a `name` column (refuses to overwrite; verifies the original columns).
+node backend/scripts/add-stock-names.mjs data/<dataset>.csv data/sp500-constituents.wikitext \
+  data/<dataset>-with-names.csv
+```
+
+The script copies every original line byte for byte, appends the name of each ticker listed in the
+constituents table (an empty field for any ticker it does not list, never a guess) and prints the
+matched and unresolved tickers with both files' SHA-256. **Limitation:** the table lists the
+*current* constituents, while the dataset covers an earlier period; names are taken as published
+there and assume each ticker referred to the same company throughout the dataset.
 
 ### Replacement and activation
 

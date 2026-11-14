@@ -1,4 +1,4 @@
-import { buildCsv, bytesOf, daysAgo, HEADER, row } from '../../tests/helpers/csv.js';
+import { buildCsv, bytesOf, daysAgo, HEADER, row, withNames } from '../../tests/helpers/csv.js';
 import {
   type DatasetStats,
   EXPECTED_HEADER,
@@ -143,7 +143,10 @@ describe('validateDataset: file-level rejections', () => {
   ])('rejects a header with %s', async (_name, header) => {
     const result = await validate(`${header}\n${row('AAA', yesterday)}\n`);
     expect(issuesOf(result)).toEqual([
-      { line: 1, message: `header must be exactly "${EXPECTED_HEADER.join(',')}"` },
+      {
+        line: 1,
+        message: `header must be exactly "${EXPECTED_HEADER.join(',')}", optionally followed by ",name"`,
+      },
     ]);
     expect(result.rowsRead).toBe(0);
   });
@@ -387,5 +390,82 @@ describe('findShrinkage', () => {
     expect(findShrinkage(active, { ...active, ...change }).map((r) => r.dimension)).toEqual([
       dimension,
     ]);
+  });
+});
+
+describe('validateDataset: stock names', () => {
+  const twoStocks = buildCsv([
+    { ticker: 'AAA', days: 2 },
+    { ticker: 'BRK.B', days: 2 },
+  ]);
+
+  it('accepts an optional trailing name column and returns one name per ticker', async () => {
+    const result = await validate(
+      withNames(twoStocks, { AAA: 'Alpha, Inc. "A"', 'BRK.B': 'Berkshire Hathaway' }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect([...result.names]).toEqual([
+      ['AAA', 'Alpha, Inc. "A"'],
+      ['BRK.B', 'Berkshire Hathaway'],
+    ]);
+    expect(result.rows[0]).not.toHaveProperty('name'); // prices are unaffected by names
+  });
+
+  it('treats an empty name as unknown (null), never as a name', async () => {
+    const result = await validate(withNames(twoStocks, { AAA: 'Alpha' }));
+    expect(result.ok && [...result.names]).toEqual([
+      ['AAA', 'Alpha'],
+      ['BRK.B', null],
+    ]);
+  });
+
+  it('keeps accepting the file without a name column (every name unknown)', async () => {
+    const result = await validate(twoStocks);
+    expect(result.ok && [...result.names.values()]).toEqual([null, null]);
+  });
+
+  it('accepts names with non-ASCII characters exactly as written', async () => {
+    const result = await validate(withNames(twoStocks, { AAA: 'Estée Lauder – Ünïcode' }));
+    expect(result.ok && result.names.get('AAA')).toBe('Estée Lauder – Ünïcode');
+  });
+
+  it.each([
+    ['surrounding whitespace', ' Alpha', 'has leading or trailing whitespace'],
+    ['a control character', 'Al\u0007pha', 'contains control characters'],
+    ['more than 200 characters', 'x'.repeat(201), 'is longer than 200 characters'],
+  ])('rejects a name with %s, without quoting it', async (_case, name, message) => {
+    const issues = issuesOf(await validate(withNames(twoStocks, { AAA: name })));
+    expect(issues).toContainEqual({ line: 2, column: 'name', message });
+    expect(JSON.stringify(issues)).not.toContain(name.trim().slice(0, 5));
+  });
+
+  it('accepts exactly 200 characters (counted as code points, like PostgreSQL)', async () => {
+    const result = await validate(withNames(twoStocks, { AAA: '😀'.repeat(200) }));
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects different names for the same ticker, naming both lines', async () => {
+    const csv = `${HEADER},name\n${row('AAA', daysAgo(2))},Alpha\n${row('AAA', daysAgo(1))},Alpha Corp\n`;
+    expect(issuesOf(await validate(csv))).toEqual([
+      { line: 3, column: 'name', message: 'conflicts with the name of the same ticker on line 2' },
+    ]);
+  });
+
+  it('rejects a name given on some rows of a ticker but missing on others', async () => {
+    const csv = `${HEADER},name\n${row('AAA', daysAgo(2))},Alpha\n${row('AAA', daysAgo(1))},\n`;
+    expect(issuesOf(await validate(csv))[0]).toMatchObject({ line: 3, column: 'name' });
+  });
+
+  it('rejects rows with the wrong number of fields for the header in use', async () => {
+    const csv = `${HEADER},name\n${row('AAA', daysAgo(1))}\n`;
+    expect(issuesOf(await validate(csv))).toEqual([
+      { line: 2, message: 'expected 9 fields, found 8' },
+    ]);
+  });
+
+  it('rejects a misnamed extra column', async () => {
+    const result = await validate(`${HEADER},company\n${row('AAA', daysAgo(1))},Alpha\n`);
+    expect(issuesOf(result)[0]?.message).toContain('optionally followed by ",name"');
   });
 });

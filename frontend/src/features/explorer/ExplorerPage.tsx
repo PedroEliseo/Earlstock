@@ -121,8 +121,8 @@ export function ExplorerPage() {
           Stocks
         </Typography>
         <Typography color="text.secondary">
-          Every stock in the active dataset, with the first and last date for which daily prices are
-          available.
+          Every stock in the active dataset, with its name, ticker and the first and last date for
+          which daily prices are available.
         </Typography>
       </Box>
 
@@ -132,7 +132,7 @@ export function ExplorerPage() {
         sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
       >
         <TextField
-          label="Search tickers"
+          label="Search by name or ticker"
           type="search"
           value={input}
           onChange={(event) => {

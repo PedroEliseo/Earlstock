@@ -12,7 +12,15 @@ import {
 import { type ImportOptions, runImport } from '../src/importer/import-runner.js';
 import type { PriceRow } from '../src/importer/validation.js';
 import { createLogger } from '../src/shared/logger.js';
-import { asDatasetFile, buildCsv, daysAgo, HEADER, row, type StockSpec } from './helpers/csv.js';
+import {
+  asDatasetFile,
+  buildCsv,
+  daysAgo,
+  HEADER,
+  row,
+  type StockSpec,
+  withNames,
+} from './helpers/csv.js';
 import {
   connectImporter,
   createFixturePool,
@@ -358,6 +366,7 @@ describeWithDatabase('dataset importer (PostgreSQL)', () => {
         importId,
         expectedActiveImportId: activeId,
         rows: [...good, bad],
+        names: new Map(),
         rowsRead: 26,
         stats: { stockCount: 1, priceCount: 26, tradingDates: 26, firstDate: '', lastDate: '' },
         batchSize: 10,
@@ -383,6 +392,7 @@ describeWithDatabase('dataset importer (PostgreSQL)', () => {
           importId,
           expectedActiveImportId: (activeId ?? 0) + 1000,
           rows: [],
+          names: new Map(),
           rowsRead: 0,
           stats: { stockCount: 0, priceCount: 0, tradingDates: 0, firstDate: '', lastDate: '' },
         }),
@@ -397,6 +407,93 @@ describeWithDatabase('dataset importer (PostgreSQL)', () => {
       expect(retry).toMatchObject({ status: 'succeeded' });
       expect((await imports()).map((i) => i.status)).toEqual(['succeeded', 'failed', 'succeeded']);
       expect((await listedTickers()).tickers).toEqual(['AAA', 'BRK.B', 'NEW']);
+    });
+  });
+
+  describe('stock names', () => {
+    const storedNames = async () =>
+      Object.fromEntries(
+        (
+          await fixtures.query<{ ticker: string; name: string | null }>(
+            'SELECT ticker, name FROM stocks ORDER BY ticker',
+          )
+        ).rows.map((r) => [r.ticker, r.name]),
+      );
+
+    it('stores the names of a file with a name column; unknown names stay NULL', async () => {
+      const outcome = await importCsv(withNames(buildCsv(STOCKS), { AAA: 'Alpha, Inc.' }));
+      expect(outcome).toMatchObject({ status: 'succeeded' });
+      expect(await storedNames()).toEqual({ AAA: 'Alpha, Inc.', 'BRK.B': null });
+    });
+
+    it('keeps stored names when a later file has no name column or an empty name', async () => {
+      await importCsv(withNames(buildCsv(STOCKS), { AAA: 'Alpha', 'BRK.B': 'Berkshire' }));
+      const legacy = buildCsv([...STOCKS, { ticker: 'NEW', days: 2 }]);
+      expect(await importCsv(legacy)).toMatchObject({ status: 'succeeded' });
+      expect(await storedNames()).toEqual({ AAA: 'Alpha', 'BRK.B': 'Berkshire', NEW: null });
+
+      const partial = withNames(buildCsv([...STOCKS, { ticker: 'NEW', days: 3 }]), {
+        NEW: 'Newco',
+      });
+      expect(await importCsv(partial)).toMatchObject({ status: 'succeeded' });
+      expect(await storedNames()).toEqual({ AAA: 'Alpha', 'BRK.B': 'Berkshire', NEW: 'Newco' });
+    });
+
+    it('replaces a stored name with a different one from a newer file', async () => {
+      await importCsv(withNames(buildCsv(STOCKS), { AAA: 'Alpha' }));
+      await importCsv(
+        withNames(buildCsv([...STOCKS, { ticker: 'X', days: 1 }]), { AAA: 'Alpha Holdings' }),
+      );
+      expect((await storedNames())['AAA']).toBe('Alpha Holdings');
+    });
+
+    it('leaves names untouched when the import fails or is rejected', async () => {
+      await importCsv(withNames(buildCsv(STOCKS), { AAA: 'Alpha' }));
+      const renamed = withNames(buildCsv([...STOCKS, { ticker: 'NEW', days: 2 }]), {
+        AAA: 'Changed',
+        NEW: 'Newco',
+      });
+
+      await expect(
+        importCsv(renamed, {
+          hooks: { beforeCommit: () => Promise.reject(new Error('injected')) },
+        }),
+      ).rejects.toThrow('injected');
+      const conflicting = `${HEADER},name\n${row('AAA', daysAgo(2))},One\n${row('AAA', daysAgo(1))},Two\n`;
+      expect(await importCsv(conflicting)).toMatchObject({
+        status: 'rejected',
+        reason: 'validation',
+      });
+
+      expect(await storedNames()).toEqual({ AAA: 'Alpha', 'BRK.B': null });
+    });
+
+    it('treats the identical enriched file as a no-op, and imports prices identically with or without names', async () => {
+      const plain = buildCsv(STOCKS);
+      await importCsv(plain);
+      const pricesWithout = await logicalRows();
+      const enriched = withNames(plain, { AAA: 'Alpha' });
+      expect(await importCsv(enriched)).toMatchObject({ status: 'succeeded' });
+      expect(await logicalRows()).toEqual(pricesWithout);
+      const before = await fingerprint();
+      expect(await importCsv(enriched)).toMatchObject({ status: 'unchanged' });
+      expect(await fingerprint()).toEqual(before);
+    });
+
+    it('reports how many stocks are named in a dry run, writing nothing', async () => {
+      const logs: string[] = [];
+      const before = await fingerprint();
+      const outcome = await runImport(
+        importer,
+        asDatasetFile(withNames(buildCsv(STOCKS), { AAA: 'Alpha' })),
+        {
+          dryRun: true,
+          logger: createLogger((_level, line) => logs.push(line)),
+        },
+      );
+      expect(outcome.status).toBe('dry-run');
+      expect(logs.join('\n')).toContain('"namedStocks":1');
+      expect(await fingerprint()).toEqual(before);
     });
   });
 
