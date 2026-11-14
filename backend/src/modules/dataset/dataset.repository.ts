@@ -22,8 +22,8 @@ export type PrivilegeViolation =
   | 'can_write_data'
   | 'privileged_membership';
 
-/** Built-in roles the API role must not belong to, directly or through inheritance. */
-const PRIVILEGED_ROLES = [
+/** Built-in roles the API (and importer) roles must not belong to, directly or through inheritance. */
+export const PRIVILEGED_ROLES = [
   'pg_database_owner',
   'pg_read_all_data',
   'pg_write_all_data',

@@ -33,23 +33,26 @@ export interface TestDatabaseUrls {
   migration: string;
   /** API-role credentials on the test database: everything the application does. */
   api: string;
+  /** Importer-role credentials on the test database: everything the dataset importer does. */
+  importer: string;
   target: DatabaseTarget;
 }
 
 /**
  * Resolves the test-database URLs, or null when TEST_DATABASE_URL is unset (database tests skip).
- * Role credentials are not configured twice: they come from MIGRATION_DATABASE_URL and
- * MARKET_DATA_DATABASE_URL (the single source), retargeted at TEST_DATABASE_URL's server and
- * database. Fails closed if anything is missing, ambiguous, or would share a database or a role.
+ * Role credentials are not configured twice: they come from MIGRATION_DATABASE_URL,
+ * MARKET_DATA_DATABASE_URL and IMPORTER_DATABASE_URL (the single source), retargeted at
+ * TEST_DATABASE_URL's server and database. Fails closed if anything is missing, ambiguous, or would share a database or a role.
  */
 export function testDatabaseUrls(env: NodeJS.ProcessEnv = process.env): TestDatabaseUrls | null {
   const lifecycle = env['TEST_DATABASE_URL'];
   if (!lifecycle) return null;
   const migrationSource = env['MIGRATION_DATABASE_URL'];
   const apiSource = env['MARKET_DATA_DATABASE_URL'];
-  if (!migrationSource || !apiSource) {
+  const importerSource = env['IMPORTER_DATABASE_URL'];
+  if (!migrationSource || !apiSource || !importerSource) {
     throw new Error(
-      'TEST_DATABASE_URL is set, so MIGRATION_DATABASE_URL and MARKET_DATA_DATABASE_URL are required too (test roles use their credentials)',
+      'TEST_DATABASE_URL is set, so MIGRATION_DATABASE_URL, MARKET_DATA_DATABASE_URL and IMPORTER_DATABASE_URL are required too (test roles use their credentials)',
     );
   }
 
@@ -59,15 +62,18 @@ export function testDatabaseUrls(env: NodeJS.ProcessEnv = process.env): TestData
       DATABASE_URL: env['DATABASE_URL'],
       MIGRATION_DATABASE_URL: migrationSource,
       MARKET_DATA_DATABASE_URL: apiSource,
+      IMPORTER_DATABASE_URL: importerSource,
     },
     env,
   );
   const migration = withCredentialsOf(migrationSource, lifecycle, 'MIGRATION_DATABASE_URL');
   const api = withCredentialsOf(apiSource, lifecycle, 'MARKET_DATA_DATABASE_URL');
+  const importer = withCredentialsOf(importerSource, lifecycle, 'IMPORTER_DATABASE_URL');
 
   for (const [variable, url] of [
     ['MIGRATION_DATABASE_URL', migration],
     ['MARKET_DATA_DATABASE_URL', api],
+    ['IMPORTER_DATABASE_URL', importer],
   ] as const) {
     const derived = parseDatabaseTarget(variable, url, env);
     if (
@@ -78,9 +84,16 @@ export function testDatabaseUrls(env: NodeJS.ProcessEnv = process.env): TestData
       throw new Error(`${variable}: derived test URL does not target the test database`);
     }
   }
-  const roles = { lifecycle: roleOf(lifecycle), migration: roleOf(migration), api: roleOf(api) };
-  if (!roles.migration || !roles.api) {
-    throw new Error('MIGRATION_DATABASE_URL and MARKET_DATA_DATABASE_URL must name their roles');
+  const roles = {
+    lifecycle: roleOf(lifecycle),
+    migration: roleOf(migration),
+    api: roleOf(api),
+    importer: roleOf(importer),
+  };
+  if (!roles.migration || !roles.api || !roles.importer) {
+    throw new Error(
+      'MIGRATION_DATABASE_URL, MARKET_DATA_DATABASE_URL and IMPORTER_DATABASE_URL must name their roles',
+    );
   }
   if (roles.api === roles.migration || roles.api === roles.lifecycle) {
     throw new Error(
@@ -92,7 +105,12 @@ export function testDatabaseUrls(env: NodeJS.ProcessEnv = process.env): TestData
       'MIGRATION_DATABASE_URL must use a role distinct from the administrative TEST_DATABASE_URL role',
     );
   }
-  return { lifecycle, migration, api, target };
+  if ([roles.lifecycle, roles.migration, roles.api].includes(roles.importer)) {
+    throw new Error(
+      'IMPORTER_DATABASE_URL must use a role distinct from the API, migration and administrative roles',
+    );
+  }
+  return { lifecycle, migration, api, importer, target };
 }
 
 /** The role (user name) a connection URL authenticates as. */

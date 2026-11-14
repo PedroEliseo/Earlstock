@@ -36,6 +36,7 @@ export function migrationDatabase(): {
     TEST_DATABASE_URL: urls.lifecycle,
     MIGRATION_DATABASE_URL: process.env['MIGRATION_DATABASE_URL'],
     MARKET_DATA_DATABASE_URL: process.env['MARKET_DATA_DATABASE_URL'],
+    IMPORTER_DATABASE_URL: process.env['IMPORTER_DATABASE_URL'],
   });
   return { lifecycle, migration: rename(urls.migration), target };
 }

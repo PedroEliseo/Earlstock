@@ -11,6 +11,7 @@
     "dev": "tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local src/server.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node --env-file-if-exists=.env --env-file-if-exists=.env.local dist/server.js",
+    "import": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local src/importer/main.ts",
     "migrate:up": "node --env-file-if-exists=.env --env-file-if-exists=.env.local node_modules/node-pg-migrate/bin/node-pg-migrate.js -d MIGRATION_DATABASE_URL up",
     "migrate:down": "node --env-file-if-exists=.env --env-file-if-exists=.env.local node_modules/node-pg-migrate/bin/node-pg-migrate.js -d MIGRATION_DATABASE_URL down",
     "migrate:create": "node-pg-migrate create --migration-file-language sql",
@@ -27,6 +28,7 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test"
   },
   "dependencies": {
+    "csv-parse": "^7.0.3",
     "express": "^5.3.0",
     "node-pg-migrate": "^9.0.0",
     "pg": "^8.23.1",

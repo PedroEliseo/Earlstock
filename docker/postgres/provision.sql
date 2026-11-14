@@ -5,6 +5,7 @@
 -- from the same URLs the application and migrations use (single source of truth):
 --   MIGRATION_DATABASE_URL    -> schema-owner role (runs migrations)
 --   MARKET_DATA_DATABASE_URL  -> read-only API role, member of market_data_reader
+--   IMPORTER_DATABASE_URL     -> dataset importer role, member of market_data_writer
 -- Passwords are read from the environment with \getenv and substituted as quoted literals; they are
 -- never printed, and statement logging is suppressed for this session.
 
@@ -17,6 +18,7 @@ SET client_min_messages = 'warning';
 
 \getenv migration_url MIGRATION_DATABASE_URL
 \getenv api_url MARKET_DATA_DATABASE_URL
+\getenv importer_url IMPORTER_DATABASE_URL
 \if :{?migration_url}
 \else
   \set migration_url ''
@@ -25,31 +27,43 @@ SET client_min_messages = 'warning';
 \else
   \set api_url ''
 \endif
+\if :{?importer_url}
+\else
+  \set importer_url ''
+\endif
 
 -- Parse "postgres://user:password@host[:port]/database". Simple user names and URL-safe passwords
 -- only: anything needing percent-encoding is rejected rather than decoded.
 SELECT owner_parts[1] AS owner_role, owner_parts[2] AS owner_password, owner_parts[3] AS database_name,
        api_parts[1] AS api_role, api_parts[2] AS api_password,
+       importer_parts[1] AS importer_role, importer_parts[2] AS importer_password,
        coalesce(error, '') AS config_error, error IS NOT NULL AS config_invalid
 FROM (
-  SELECT owner_parts, api_parts,
+  SELECT owner_parts, api_parts, importer_parts,
     CASE
       WHEN owner_parts IS NULL THEN 'MIGRATION_DATABASE_URL is missing or not of the form postgres://user:password@host[:port]/database'
       WHEN api_parts IS NULL THEN 'MARKET_DATA_DATABASE_URL is missing or not of the form postgres://user:password@host[:port]/database'
+      WHEN importer_parts IS NULL THEN 'IMPORTER_DATABASE_URL is missing or not of the form postgres://user:password@host[:port]/database'
       WHEN owner_parts[1] !~ '^[a-z_][a-z0-9_]*$' OR api_parts[1] !~ '^[a-z_][a-z0-9_]*$'
+           OR importer_parts[1] !~ '^[a-z_][a-z0-9_]*$'
         THEN 'role names must match [a-z_][a-z0-9_]*'
       WHEN owner_parts[2] !~ '^[A-Za-z0-9._~-]+$' OR api_parts[2] !~ '^[A-Za-z0-9._~-]+$'
+           OR importer_parts[2] !~ '^[A-Za-z0-9._~-]+$'
         THEN 'passwords may only contain [A-Za-z0-9._~-] (no URL encoding)'
-      WHEN owner_parts[1] = api_parts[1] THEN 'MIGRATION_DATABASE_URL and MARKET_DATA_DATABASE_URL must use different roles'
-      WHEN owner_parts[3] <> api_parts[3] THEN 'MIGRATION_DATABASE_URL and MARKET_DATA_DATABASE_URL must name the same database'
+      WHEN owner_parts[1] IN (api_parts[1], importer_parts[1]) OR api_parts[1] = importer_parts[1]
+        THEN 'MIGRATION_DATABASE_URL, MARKET_DATA_DATABASE_URL and IMPORTER_DATABASE_URL must each use a different role'
+      WHEN owner_parts[3] <> api_parts[3] OR owner_parts[3] <> importer_parts[3]
+        THEN 'MIGRATION_DATABASE_URL, MARKET_DATA_DATABASE_URL and IMPORTER_DATABASE_URL must name the same database'
       WHEN owner_parts[3] IN ('postgres', 'template0', 'template1') THEN 'refusing to provision a system database'
-      WHEN owner_parts[1] = 'market_data_reader' OR api_parts[1] = 'market_data_reader' THEN 'market_data_reader is reserved for the read-only group role'
-      WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN (owner_parts[1], api_parts[1]) AND (rolsuper OR oid = 10))
+      WHEN ARRAY[owner_parts[1], api_parts[1], importer_parts[1]] && ARRAY['market_data_reader', 'market_data_writer']
+        THEN 'market_data_reader and market_data_writer are reserved for the group roles'
+      WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN (owner_parts[1], api_parts[1], importer_parts[1]) AND (rolsuper OR oid = 10))
         THEN 'refusing to manage a superuser or bootstrap role as an EarlStock role'
     END AS error
   FROM (
     SELECT regexp_match(:'migration_url', '^postgres(?:ql)?://([^:@/?#]+):([^@/?#]+)@[^/?#]+/([^/?#]+)$') AS owner_parts,
-           regexp_match(:'api_url', '^postgres(?:ql)?://([^:@/?#]+):([^@/?#]+)@[^/?#]+/([^/?#]+)$') AS api_parts
+           regexp_match(:'api_url', '^postgres(?:ql)?://([^:@/?#]+):([^@/?#]+)@[^/?#]+/([^/?#]+)$') AS api_parts,
+           regexp_match(:'importer_url', '^postgres(?:ql)?://([^:@/?#]+):([^@/?#]+)@[^/?#]+/([^/?#]+)$') AS importer_parts
   ) urls
 ) checked
 \gset
@@ -62,7 +76,9 @@ FROM (
 -- Roles ------------------------------------------------------------------------------------------
 SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'owner_role') AS create_owner,
        NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'api_role') AS create_api,
-       NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'market_data_reader') AS create_reader
+       NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'market_data_reader') AS create_reader,
+       NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'importer_role') AS create_importer,
+       NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'market_data_writer') AS create_writer
 \gset
 
 \if :create_owner
@@ -74,6 +90,12 @@ SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'owner_role') AS crea
 \if :create_reader
   CREATE ROLE market_data_reader;
 \endif
+\if :create_importer
+  CREATE ROLE :"importer_role";
+\endif
+\if :create_writer
+  CREATE ROLE market_data_writer;
+\endif
 
 -- Attributes are (re)applied on every run, so a manually altered role is corrected.
 ALTER ROLE :"owner_role" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
@@ -84,6 +106,11 @@ ALTER ROLE :"api_role" WITH PASSWORD :'api_password';
 ALTER ROLE :"api_role" SET default_transaction_read_only = on;
 ALTER ROLE market_data_reader WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 GRANT market_data_reader TO :"api_role";
+-- The importer writes datasets only; its table grants come from the importer-permissions migration.
+ALTER ROLE :"importer_role" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
+ALTER ROLE :"importer_role" WITH PASSWORD :'importer_password';
+ALTER ROLE market_data_writer WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+GRANT market_data_writer TO :"importer_role";
 
 -- Database and object ownership ---------------------------------------------------------------------
 SELECT NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'database_name') AS create_database \gset
@@ -158,4 +185,4 @@ SELECT :unexpected_owners > 0 AS ownership_incomplete \gset
   DO $$ BEGIN RAISE EXCEPTION 'ownership transfer incomplete'; END $$;
 \endif
 
-\echo 'provisioned database' :database_name ': owner role' :owner_role ', API role' :api_role '(member of market_data_reader)'
+\echo 'provisioned database' :database_name ': owner role' :owner_role ', API role' :api_role '(member of market_data_reader), importer role' :importer_role '(member of market_data_writer)'

@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { createPool } from '../../src/db/pool.js';
 import { testDatabaseUrls } from '../setup/global-setup.js';
 
@@ -58,6 +58,19 @@ export async function truncateAll(pool: Pool): Promise<void> {
   await pool.query(
     'TRUNCATE dataset_snapshot, daily_prices, data_imports, stocks RESTART IDENTITY',
   );
+}
+
+/**
+ * A dedicated, connected session as the importer role on the test database, configured as the
+ * importer CLI configures its own. The caller must end() it.
+ */
+export async function connectImporter(): Promise<Client> {
+  const client = new Client({
+    connectionString: requireUrls().importer,
+    application_name: 'earlstock-importer-test',
+  });
+  await client.connect();
+  return client;
 }
 
 /** A pool whose connections are always refused (nothing listens on port 1), for tests that must not reach a DB. */

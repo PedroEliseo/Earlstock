@@ -103,6 +103,7 @@ describe('testDatabaseUrls', () => {
     TEST_DATABASE_URL: 'postgres://admin:admin-pw@localhost:5432/earlstock_test',
     MIGRATION_DATABASE_URL: 'postgres://owner_role:owner-pw@localhost:5432/earlstock',
     MARKET_DATA_DATABASE_URL: 'postgres://api_role:api-pw@localhost:5432/earlstock',
+    IMPORTER_DATABASE_URL: 'postgres://importer_role:importer-pw@localhost:5432/earlstock',
   };
 
   const errorOf = (overrides: NodeJS.ProcessEnv): Error => {
@@ -123,11 +124,14 @@ describe('testDatabaseUrls', () => {
 
     expect(urls?.migration).toBe('postgres://owner_role:owner-pw@localhost:5432/earlstock_test');
     expect(urls?.api).toBe('postgres://api_role:api-pw@localhost:5432/earlstock_test');
+    expect(urls?.importer).toBe(
+      'postgres://importer_role:importer-pw@localhost:5432/earlstock_test',
+    );
     expect(urls?.lifecycle).toBe(env['TEST_DATABASE_URL']);
     expect(urls?.target.database).toBe('earlstock_test');
   });
 
-  it.each(['MIGRATION_DATABASE_URL', 'MARKET_DATA_DATABASE_URL'])(
+  it.each(['MIGRATION_DATABASE_URL', 'MARKET_DATA_DATABASE_URL', 'IMPORTER_DATABASE_URL'])(
     'fails closed when %s is missing, instead of using the administrative role',
     (variable) => {
       expect(errorOf({ [variable]: undefined }).message).toMatch(/are required too/);
@@ -147,13 +151,23 @@ describe('testDatabaseUrls', () => {
     ).toMatch(/distinct from the migration and administrative roles/);
   });
 
+  it.each([
+    ['API', 'postgres://api_role:x@localhost:5432/earlstock'],
+    ['migration', 'postgres://owner_role:x@localhost:5432/earlstock'],
+    ['administrative', 'postgres://admin:x@localhost:5432/earlstock'],
+  ])('refuses when the importer role is the %s role', (_name, url) => {
+    expect(errorOf({ IMPORTER_DATABASE_URL: url }).message).toMatch(
+      /IMPORTER_DATABASE_URL must use a role distinct/,
+    );
+  });
+
   it('refuses when the migration role is the administrative role', () => {
     expect(
       errorOf({ MIGRATION_DATABASE_URL: 'postgres://admin:x@localhost:5432/earlstock' }).message,
     ).toMatch(/MIGRATION_DATABASE_URL must use a role distinct/);
   });
 
-  it.each(['MIGRATION_DATABASE_URL', 'MARKET_DATA_DATABASE_URL'])(
+  it.each(['MIGRATION_DATABASE_URL', 'MARKET_DATA_DATABASE_URL', 'IMPORTER_DATABASE_URL'])(
     'refuses when %s uses the test database name itself',
     (variable) => {
       expect(
@@ -173,10 +187,11 @@ describe('testDatabaseUrls', () => {
         MARKET_DATA_DATABASE_URL: 'postgres://owner_role:owner-pw@localhost:5432/earlstock',
       }),
       errorOf({ MIGRATION_DATABASE_URL: 'postgres://admin:admin-pw@localhost:5432/earlstock' }),
+      errorOf({ IMPORTER_DATABASE_URL: 'postgres://api_role:api-pw@localhost:5432/earlstock' }),
     ].map((error) => error.message);
 
     for (const message of messages) {
-      expect(message).not.toMatch(/-pw|owner_role|api_role|admin:/);
+      expect(message).not.toMatch(/-pw|owner_role|api_role|importer_role|admin:/);
     }
   });
 });
