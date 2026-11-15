@@ -5,10 +5,11 @@ import Container from '@mui/material/Container';
 import Link from '@mui/material/Link';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Link as RouterLink, Outlet, useLocation } from 'react-router';
 import { ColorModeToggle } from './ColorModeToggle';
 import { DatasetUpdatedNotice } from './DatasetUpdatedNotice';
+import { DevErrorTriggerButton, RenderErrorProbe } from './DevErrorTrigger';
 import { ErrorBoundary } from './ErrorBoundary';
 
 /** Primary navigation; each feature adds its entry when it exists. */
@@ -28,6 +29,10 @@ export function Layout() {
   // Focus moves only when the path actually changes. Comparing with the previous path (rather than
   // skipping a "first render") stays correct when effects run twice, as in React Strict Mode.
   const previousPath = useRef(pathname);
+  // Development-only error demo (DevErrorTrigger): the path on which a render error was requested.
+  // It applies to that page only, so navigating away recovers as it does after any page crash.
+  const [renderErrorPath, setRenderErrorPath] = useState<string | null>(null);
+  if (renderErrorPath !== null && renderErrorPath !== pathname) setRenderErrorPath(null);
 
   useEffect(() => {
     if (previousPath.current === pathname) return;
@@ -93,7 +98,16 @@ export function Layout() {
                 ))}
               </Box>
             </Box>
-            <ColorModeToggle />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {import.meta.env.DEV && (
+                <DevErrorTriggerButton
+                  onTrigger={() => {
+                    setRenderErrorPath(pathname);
+                  }}
+                />
+              )}
+              <ColorModeToggle />
+            </Box>
           </Toolbar>
         </Container>
       </AppBar>
@@ -108,6 +122,7 @@ export function Layout() {
       >
         {/* Keyed by path: a crash on one page does not stick after navigating away. */}
         <ErrorBoundary key={pathname}>
+          {import.meta.env.DEV && renderErrorPath === pathname && <RenderErrorProbe />}
           <Outlet />
         </ErrorBoundary>
       </Container>
