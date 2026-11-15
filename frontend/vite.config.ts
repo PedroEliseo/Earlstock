@@ -1,4 +1,5 @@
 import react from '@vitejs/plugin-react';
+import { loadEnv, type Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -8,13 +9,51 @@ import { defineConfig } from 'vitest/config';
  * yet (see README).
  */
 const apiTarget = process.env['EARLSTOCK_API_URL'] ?? 'http://localhost:3000';
+/**
+ * Browser telemetry (opt-in, VITE_EARLSTOCK_TELEMETRY=1) is posted to the same origin under /otlp
+ * and forwarded to the local OTLP relay (backend `npm run otlp-relay`), which adds the credentials.
+ */
+const otlpRelayTarget = process.env['EARLSTOCK_OTLP_RELAY_URL'] ?? 'http://127.0.0.1:4319';
 
-export default defineConfig({
-  plugins: [react()],
+/**
+ * With VITE_EARLSTOCK_TELEMETRY=1, adds src/telemetry/boot.ts to index.html as a module script
+ * placed before the application's, so telemetry starts first (see boot.ts). Without it, nothing is
+ * added and the SDK is not bundled.
+ */
+function browserTelemetry(enabled: boolean): Plugin[] {
+  if (!enabled) return [];
+  return [
+    {
+      name: 'earlstock-browser-telemetry',
+      // 'pre': added before Vite processes index.html, so the build bundles it like the app's entry.
+      transformIndexHtml: {
+        order: 'pre',
+        handler: () => [
+          {
+            tag: 'script',
+            attrs: { type: 'module', src: '/src/telemetry/boot.ts' },
+            injectTo: 'head',
+          },
+        ],
+      },
+    },
+  ];
+}
+
+export default defineConfig(({ mode }) => ({
+  plugins: [
+    react(),
+    ...browserTelemetry(loadEnv(mode, process.cwd(), 'VITE_')['VITE_EARLSTOCK_TELEMETRY'] === '1'),
+  ],
   server: {
     proxy: {
       '/api': { target: apiTarget, changeOrigin: false },
       '/health': { target: apiTarget, changeOrigin: false },
+      '/otlp': {
+        target: otlpRelayTarget,
+        changeOrigin: false,
+        rewrite: (path) => path.replace(/^\/otlp/, ''),
+      },
     },
   },
   build: {
@@ -58,4 +97,4 @@ export default defineConfig({
     restoreMocks: true,
     unstubGlobals: true,
   },
-});
+}));

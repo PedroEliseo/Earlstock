@@ -66,7 +66,7 @@ export function createErrorHandler(logger: Logger = defaultLogger) {
         code: body.code,
         status,
         method: req.method,
-        path: req.path,
+        route: routeTemplate(req),
         error: serializeError(err),
       };
       // An empty dataset is an expected operational state, not a fault.
@@ -110,6 +110,19 @@ function toErrorResponse(err: unknown): ErrorResponse {
   }
   // DatabaseQueryError (any other database failure) and anything unexpected: never expose details.
   return { status: 500, body: { code: 'INTERNAL', message: 'Internal Server Error' } };
+}
+
+/**
+ * The matched route's template for logs (e.g. `/:ticker`, relative to its router; the router's mount
+ * path is no longer known here), or `unmatched`. Never the request's own path or URL: they carry user
+ * input such as tickers and search text.
+ */
+function routeTemplate(req: Request): string {
+  const route: unknown = req.route;
+  if (typeof route === 'object' && route !== null && 'path' in route) {
+    if (typeof route.path === 'string') return route.path;
+  }
+  return 'unmatched';
 }
 
 /** A 4xx `status` set by Express or its router (duck-typed: such errors may come from another realm). */

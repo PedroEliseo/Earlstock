@@ -11,6 +11,7 @@
     "dev": "OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-earlstock-api} tsx watch --env-file-if-exists=.env --env-file-if-exists=.env.local --env-file-if-exists=.env.observability.local --import ./telemetry/register.mjs src/server.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-earlstock-api} node --env-file-if-exists=.env --env-file-if-exists=.env.local --env-file-if-exists=.env.observability.local --import ./telemetry/register.mjs dist/server.js",
+    "otlp-relay": "node --env-file-if-exists=.env.observability.local telemetry/browser-otlp-relay.mjs",
     "import": "OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-earlstock-importer} OTEL_NODE_RESOURCE_DETECTORS=${OTEL_NODE_RESOURCE_DETECTORS:-env,serviceinstance,os,host} tsx --env-file-if-exists=.env --env-file-if-exists=.env.local --env-file-if-exists=.env.observability.local --import ./telemetry/register.mjs src/importer/main.ts",
     "migrate:up": "node --env-file-if-exists=.env --env-file-if-exists=.env.local node_modules/node-pg-migrate/bin/node-pg-migrate.js -d MIGRATION_DATABASE_URL up",
     "migrate:down": "node --env-file-if-exists=.env --env-file-if-exists=.env.local node_modules/node-pg-migrate/bin/node-pg-migrate.js -d MIGRATION_DATABASE_URL down",

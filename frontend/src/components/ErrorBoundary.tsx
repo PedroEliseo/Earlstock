@@ -1,5 +1,6 @@
 import Button from '@mui/material/Button';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { reportCaughtError } from '../telemetry/reportError';
 import { StatusMessage } from './StatusMessage';
 
 interface ErrorBoundaryState {
@@ -19,6 +20,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBound
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('Unexpected rendering error', error, info.componentStack);
+    // React does not rethrow caught errors to the global handlers, so this is their only report.
+    reportCaughtError(error);
   }
 
   override render() {
