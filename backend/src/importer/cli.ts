@@ -1,9 +1,25 @@
 import { parseArgs } from 'node:util';
+import { SpanStatusCode } from '@opentelemetry/api';
 import { Client } from 'pg';
-import { logger, serializeError } from '../shared/logger.js';
+import { logger } from '../shared/logger.js';
 import { loadImporterConfig } from './config.js';
 import { DatasetFileError, readDatasetFile } from './dataset-file.js';
-import { ExcessivePrivilegesError, type ImportOutcome, runImport } from './import-runner.js';
+import {
+  ExcessivePrivilegesError,
+  type ImportOutcome,
+  isReportedImportError,
+  runImport,
+} from './import-runner.js';
+import {
+  type ExecutionOutcome,
+  type ExecutionReason,
+  failureReason,
+  importErrorType,
+  type ImportMode,
+  recordExecution,
+  serializeImporterError,
+  withImportSpan,
+} from './telemetry.js';
 
 /**
  * CSV-to-PostgreSQL importer: `npm run import -- --file <path> [options]`. A standalone process,
@@ -66,20 +82,82 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
     return EXIT.usage;
   }
 
+  const mode: ImportMode = args['dry-run'] ? 'dry_run' : 'import';
+  const options = { dryRun: args['dry-run'], force: args.force, allowShrink: args['allow-shrink'] };
+  const filePath = args.file;
+
+  // One trace per run. Its outcome is set from the result, since failures are returned as exit
+  // codes rather than thrown.
+  return withImportSpan('import.execute', { 'earlstock.import.mode': mode }, async (span) => {
+    const started = performance.now();
+    const result: RunResult = await execute(filePath, options, env).catch((err: unknown) => {
+      // Not expected (execute handles its errors), but the exit code must stay "failed".
+      logger.error('import failed', { error: serializeImporterError(err) });
+      return { exitCode: EXIT.failed, outcome: 'failure', reason: 'unexpected' };
+    });
+    span.setAttribute('earlstock.import.outcome', result.outcome);
+    if (result.reason) span.setAttribute('earlstock.import.reason', result.reason);
+    if (result.outcome === 'failure' || result.outcome === 'rejected') {
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      if (result.errorType) span.setAttribute('error.type', result.errorType);
+    }
+    recordExecution(mode, result.outcome, result.reason, (performance.now() - started) / 1000);
+    return result.exitCode;
+  });
+}
+
+interface RunResult {
+  exitCode: number;
+  outcome: ExecutionOutcome;
+  reason?: ExecutionReason;
+  /** Error class name when the run ended with an error. */
+  errorType?: string;
+}
+
+function resultFor(outcome: ImportOutcome): RunResult {
+  const exitCode = exitCodeFor(outcome);
+  switch (outcome.status) {
+    case 'succeeded':
+    case 'dry-run':
+      return { exitCode, outcome: 'success' };
+    case 'unchanged':
+      return { exitCode, outcome: 'no_op' };
+    case 'busy':
+      return { exitCode, outcome: 'busy' };
+    case 'rejected':
+      return { exitCode, outcome: 'rejected', reason: outcome.reason };
+  }
+}
+
+/** One run after argument parsing; never throws. */
+async function execute(
+  filePath: string,
+  options: { dryRun: boolean; force: boolean; allowShrink: boolean },
+  env: NodeJS.ProcessEnv,
+): Promise<RunResult> {
   let config;
   let file;
   try {
     config = loadImporterConfig(env);
-    file = await readDatasetFile(args.file);
+    file = await withImportSpan('import.file.read', {}, async (span) => {
+      const read = await readDatasetFile(filePath);
+      span.setAttribute('earlstock.import.file.size_bytes', read.sizeBytes);
+      return read;
+    });
   } catch (err) {
-    logger.error('importer not started', { error: serializeError(err) });
-    return EXIT.usage;
+    logger.error('importer not started', { error: serializeImporterError(err) });
+    return {
+      exitCode: EXIT.usage,
+      outcome: 'failure',
+      reason: 'usage',
+      errorType: importErrorType(err),
+    };
   }
   logger.info('dataset file read', {
     file: file.fileName,
     sizeBytes: file.sizeBytes,
     sha256: file.sha256,
-    dryRun: args['dry-run'],
+    dryRun: options.dryRun,
   });
 
   // ONE session for the whole run: lock, bookkeeping and replacement share this connection.
@@ -90,24 +168,34 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
     idle_in_transaction_session_timeout: 60_000,
   });
   client.on('error', (err) => {
-    logger.error('importer database connection error', { error: serializeError(err) });
+    logger.error('importer database connection error', { error: serializeImporterError(err) });
   });
   try {
     await client.connect();
-    const outcome = await runImport(client, file, {
-      dryRun: args['dry-run'],
-      force: args.force,
-      allowShrink: args['allow-shrink'],
-    });
-    return exitCodeFor(outcome);
+    return resultFor(await runImport(client, file, options));
   } catch (err) {
     if (err instanceof ExcessivePrivilegesError) {
       logger.error('importer refused to run', { violations: err.violations });
-      return EXIT.usage;
+      return {
+        exitCode: EXIT.usage,
+        outcome: 'failure',
+        reason: 'privileges',
+        errorType: err.name,
+      };
     }
-    if (err instanceof DatasetFileError) return EXIT.usage;
-    logger.error('import failed', { error: serializeError(err) });
-    return EXIT.failed;
+    if (err instanceof DatasetFileError) {
+      return { exitCode: EXIT.usage, outcome: 'failure', reason: 'usage', errorType: err.name };
+    }
+    // runImport logs the failures of the import itself; only earlier ones (e.g. connecting) are
+    // logged here, so each failure is logged once.
+    if (!isReportedImportError(err))
+      logger.error('import failed', { error: serializeImporterError(err) });
+    return {
+      exitCode: EXIT.failed,
+      outcome: 'failure',
+      reason: failureReason(err),
+      errorType: importErrorType(err),
+    };
   } finally {
     await client.end().catch(() => undefined);
   }

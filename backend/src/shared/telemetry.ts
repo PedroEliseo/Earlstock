@@ -28,11 +28,15 @@ function isExpectedError(err: unknown): boolean {
  * no option to filter them. The HTTP server span (ERROR only for 5xx) and these `stocks.*` spans
  * (ERROR only for unexpected errors) keep the correct semantics; error rates and alerts should be
  * based on them or on the HTTP status code, not on the Express layer spans.
+ *
+ * `errorType` gives the span's `error.type` for an unexpected error (default: the error's name); it
+ * must return a stable, low-cardinality value, never a message.
  */
 export function withSpan<T>(
   name: string,
   attributes: Attributes,
   operation: (span: Span) => Promise<T>,
+  errorType: (err: unknown) => string = errorName,
 ): Promise<T> {
   return tracer.startActiveSpan(name, { attributes }, async (span) => {
     try {
@@ -40,13 +44,17 @@ export function withSpan<T>(
     } catch (err) {
       if (!isExpectedError(err)) {
         span.setStatus({ code: SpanStatusCode.ERROR });
-        span.setAttribute('error.type', err instanceof Error ? err.name : 'unknown');
+        span.setAttribute('error.type', errorType(err));
       }
       throw err;
     } finally {
       span.end();
     }
   });
+}
+
+function errorName(err: unknown): string {
+  return err instanceof Error ? err.name : 'unknown';
 }
 
 interface TelemetryHandle {

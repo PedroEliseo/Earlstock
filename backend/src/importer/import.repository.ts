@@ -1,5 +1,6 @@
 import type { Client } from 'pg';
 import { PRIVILEGED_ROLES } from '../modules/dataset/dataset.repository.js';
+import { recordBatch, withImportSpan } from './telemetry.js';
 import type { DatasetStats, PriceRow } from './validation.js';
 
 /**
@@ -273,69 +274,95 @@ export async function replaceDataset(client: Client, replacement: Replacement): 
     // Stocks are kept by ticker, so ids stay stable across imports; new tickers get new ids. A
     // name from the file is stored (or updates the stored one); a missing name (null) never erases
     // a stored name. Inside this transaction, so a failed import leaves names untouched too.
+    // Spans below only group the statements (the pg instrumentation traces each one); they add no
+    // query and no wait to the transaction.
     const tickers = [...new Set(rows.map((row) => row.ticker))].sort();
-    await client.query(
-      `INSERT INTO stocks (ticker, name)
+    await withImportSpan(
+      'import.stocks.upsert',
+      { 'earlstock.import.stocks': tickers.length },
+      () =>
+        client.query(
+          `INSERT INTO stocks (ticker, name)
        SELECT t.ticker, t.name FROM unnest($1::text[], $2::text[]) AS t(ticker, name) ORDER BY t.ticker
        ON CONFLICT (ticker) DO UPDATE SET name = EXCLUDED.name
        WHERE EXCLUDED.name IS NOT NULL AND stocks.name IS DISTINCT FROM EXCLUDED.name`,
-      [tickers, tickers.map((ticker) => replacement.names.get(ticker) ?? null)],
+          [tickers, tickers.map((ticker) => replacement.names.get(ticker) ?? null)],
+        ),
     );
 
-    await client.query('DELETE FROM daily_prices');
+    await withImportSpan('import.prices.delete', {}, () =>
+      client.query('DELETE FROM daily_prices'),
+    );
 
-    let inserted = 0;
-    for (let start = 0; start < rows.length; start += batchSize) {
-      const batch = rows.slice(start, start + batchSize);
-      const result = await client.query(INSERT_BATCH_SQL, [...toColumnArrays(batch), importId]);
-      if (result.rowCount !== batch.length) {
-        throw new Error(
-          `batch starting at row ${String(start)} inserted ${String(result.rowCount)} of ${String(batch.length)} rows`,
-        );
-      }
-      inserted += batch.length;
-      await hooks?.afterBatch?.(inserted);
-    }
+    await withImportSpan(
+      'import.prices.insert',
+      { 'earlstock.import.rows': rows.length, 'earlstock.import.batch_size': batchSize },
+      async (span) => {
+        let inserted = 0;
+        let batches = 0;
+        for (let start = 0; start < rows.length; start += batchSize) {
+          const batch = rows.slice(start, start + batchSize);
+          const batchStarted = performance.now();
+          const result = await client.query(INSERT_BATCH_SQL, [...toColumnArrays(batch), importId]);
+          recordBatch((performance.now() - batchStarted) / 1000);
+          if (result.rowCount !== batch.length) {
+            throw new Error(
+              `batch starting at row ${String(start)} inserted ${String(result.rowCount)} of ${String(batch.length)} rows`,
+            );
+          }
+          inserted += batch.length;
+          batches += 1;
+          span.setAttribute('earlstock.import.batches', batches);
+          await hooks?.afterBatch?.(inserted);
+        }
+      },
+    );
 
-    await client.query(
-      'DELETE FROM stocks s WHERE NOT EXISTS (SELECT 1 FROM daily_prices d WHERE d.stock_id = s.id)',
+    await withImportSpan('import.stocks.prune', {}, () =>
+      client.query(
+        'DELETE FROM stocks s WHERE NOT EXISTS (SELECT 1 FROM daily_prices d WHERE d.stock_id = s.id)',
+      ),
     );
 
     // The table must now hold exactly the validated dataset and nothing else.
-    const { rows: counts } = await client.query<{
-      total: number;
-      imported: number;
-      stocks: number;
-    }>(
-      `SELECT (SELECT count(*)::int FROM daily_prices) AS total,
-              (SELECT count(*)::int FROM daily_prices WHERE import_id = $1) AS imported,
-              (SELECT count(*)::int FROM stocks) AS stocks`,
-      [importId],
-    );
-    const count = counts[0];
-    if (
-      count?.total !== stats.priceCount ||
-      count.imported !== stats.priceCount ||
-      count.stocks !== stats.stockCount
-    ) {
-      throw new Error('row counts after the replacement do not match the validated dataset');
-    }
+    await withImportSpan('import.verify', {}, async () => {
+      const { rows: counts } = await client.query<{
+        total: number;
+        imported: number;
+        stocks: number;
+      }>(
+        `SELECT (SELECT count(*)::int FROM daily_prices) AS total,
+                (SELECT count(*)::int FROM daily_prices WHERE import_id = $1) AS imported,
+                (SELECT count(*)::int FROM stocks) AS stocks`,
+        [importId],
+      );
+      const count = counts[0];
+      if (
+        count?.total !== stats.priceCount ||
+        count.imported !== stats.priceCount ||
+        count.stocks !== stats.stockCount
+      ) {
+        throw new Error('row counts after the replacement do not match the validated dataset');
+      }
+    });
 
-    const succeeded = await client.query(
-      `UPDATE data_imports
-       SET status = 'succeeded', finished_at = greatest(clock_timestamp(), started_at),
-           rows_read = $2, stock_count = $3, price_count = $4
-       WHERE id = $1 AND status = 'running'`,
-      [importId, replacement.rowsRead, stats.stockCount, stats.priceCount],
-    );
-    if (succeeded.rowCount !== 1) throw new Error('the import record is no longer running');
+    await withImportSpan('import.snapshot.activate', {}, async () => {
+      const succeeded = await client.query(
+        `UPDATE data_imports
+         SET status = 'succeeded', finished_at = greatest(clock_timestamp(), started_at),
+             rows_read = $2, stock_count = $3, price_count = $4
+         WHERE id = $1 AND status = 'running'`,
+        [importId, replacement.rowsRead, stats.stockCount, stats.priceCount],
+      );
+      if (succeeded.rowCount !== 1) throw new Error('the import record is no longer running');
 
-    // The pointer moves last; its foreign key only accepts a succeeded import.
-    await client.query(
-      `INSERT INTO dataset_snapshot (import_id) VALUES ($1)
-       ON CONFLICT (singleton) DO UPDATE SET import_id = EXCLUDED.import_id, activated_at = clock_timestamp()`,
-      [importId],
-    );
+      // The pointer moves last; its foreign key only accepts a succeeded import.
+      await client.query(
+        `INSERT INTO dataset_snapshot (import_id) VALUES ($1)
+         ON CONFLICT (singleton) DO UPDATE SET import_id = EXCLUDED.import_id, activated_at = clock_timestamp()`,
+        [importId],
+      );
+    });
 
     await hooks?.beforeCommit?.();
     await client.query('COMMIT');

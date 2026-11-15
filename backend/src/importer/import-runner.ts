@@ -13,6 +13,7 @@ import {
   type ReplacementHooks,
   tryAcquireImportLock,
 } from './import.repository.js';
+import { recordRows, serializeImporterError, withImportSpan } from './telemetry.js';
 import {
   type DatasetStats,
   findShrinkage,
@@ -103,7 +104,12 @@ export async function runImport(
 
   if (options.dryRun) return dryRun(client, file, options, log, elapsed);
 
-  if (!(await tryAcquireImportLock(client))) {
+  const locked = await withImportSpan('import.lock.acquire', {}, async (span) => {
+    const acquired = await tryAcquireImportLock(client);
+    span.setAttribute('earlstock.import.lock.acquired', acquired);
+    return acquired;
+  });
+  if (!locked) {
     log.warn('another import is running; nothing was done', source);
     return { status: 'busy' };
   }
@@ -130,7 +136,7 @@ export async function runImport(
     importId = await insertRunningImport(client, { fileName: file.fileName, sha256: file.sha256 });
     log.info('import started', { importId, ...source });
 
-    const validation = await validateDataset(file.bytes, { today: options.today ?? utcToday() });
+    const validation = await validate(file, options.today ?? utcToday());
     const validationMs = elapsed();
     rowsRead = validation.rowsRead;
     if (!validation.ok) {
@@ -181,16 +187,21 @@ export async function runImport(
     }
 
     const transactionStarted = performance.now();
-    await replaceDataset(client, {
-      importId,
-      expectedActiveImportId: active?.importId ?? null,
-      rows: validation.rows,
-      names: validation.names,
-      rowsRead: validation.rowsRead,
-      stats: validation.stats,
-      ...(options.batchSize === undefined ? {} : { batchSize: options.batchSize }),
-      ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
-    });
+    const replacingImportId = importId; // keeps the narrowed type inside the callback
+    await withImportSpan('import.database.transaction', {}, () =>
+      replaceDataset(client, {
+        importId: replacingImportId,
+        expectedActiveImportId: active?.importId ?? null,
+        rows: validation.rows,
+        names: validation.names,
+        rowsRead: validation.rowsRead,
+        stats: validation.stats,
+        ...(options.batchSize === undefined ? {} : { batchSize: options.batchSize }),
+        ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
+      }),
+    );
+    // Committed: replaceDataset returns only after COMMIT.
+    recordRows('imported', validation.stats.priceCount);
     const timings = {
       validationMs,
       transactionMs: Math.round(performance.now() - transactionStarted),
@@ -213,6 +224,7 @@ export async function runImport(
       timings,
     };
   } catch (err) {
+    if (typeof err === 'object' && err !== null) reported.add(err);
     // The replacement transaction has already been rolled back; record the failure separately.
     if (importId !== null) {
       try {
@@ -221,13 +233,13 @@ export async function runImport(
         // Left 'running'; the next run marks it abandoned.
         log.error('could not record the failed import', {
           importId,
-          error: serializeError(markError),
+          error: serializeImporterError(markError),
         });
       }
     }
     log.error('import failed; the active dataset was not changed', {
       importId,
-      error: serializeError(err),
+      error: serializeImporterError(err),
     });
     throw err;
   } finally {
@@ -251,7 +263,7 @@ async function dryRun(
   elapsed: () => number,
 ): Promise<ImportOutcome> {
   await client.query('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY');
-  const validation = await validateDataset(file.bytes, { today: options.today ?? utcToday() });
+  const validation = await validate(file, options.today ?? utcToday());
   const validationMs = elapsed();
   if (!validation.ok) {
     log.error('dry run: validation failed', {
@@ -299,6 +311,27 @@ async function dryRun(
   }
   log.info('dry run: validation passed; nothing was written', summary);
   return { status: 'dry-run', ...summary };
+}
+
+/** Errors runImport has already logged before rethrowing them, so the caller does not log them again. */
+const reported = new WeakSet<object>();
+
+export function isReportedImportError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && reported.has(err);
+}
+
+/** Validation in its own span (CPU only, no database), counting the rows read. */
+function validate(file: DatasetFile, today: string): ReturnType<typeof validateDataset> {
+  return withImportSpan('import.file.validate', {}, async (span) => {
+    const validation = await validateDataset(file.bytes, { today });
+    span.setAttributes({
+      'earlstock.import.rows_read': validation.rowsRead,
+      'earlstock.import.valid': validation.ok,
+      ...(validation.ok ? {} : { 'earlstock.import.issue_count': validation.issueCount }),
+    });
+    recordRows('read', validation.rowsRead);
+    return validation;
+  });
 }
 
 /** How many tickers of the file come with a name. */

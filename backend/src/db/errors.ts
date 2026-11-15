@@ -59,7 +59,7 @@ function stringProperty(err: unknown, key: string): string | undefined {
 }
 
 /** A PostgreSQL server error: five-character SQLSTATE plus a severity. */
-function sqlstateOf(err: unknown): string | undefined {
+export function sqlstateOf(err: unknown): string | undefined {
   const code = stringProperty(err, 'code');
   if (err instanceof DatabaseError) return code;
   return code && /^[0-9A-Z]{5}$/.test(code) && stringProperty(err, 'severity') ? code : undefined;
@@ -86,6 +86,11 @@ function isStatementTimeout(err: unknown): boolean {
     sqlstateOf(err) === QUERY_CANCELED &&
     /statement timeout/i.test(stringProperty(err, 'message') ?? '')
   );
+}
+
+/** A PostgreSQL server error (it has a SQLSTATE) or a failure to reach or keep the connection. */
+export function isDatabaseFailure(err: unknown): boolean {
+  return sqlstateOf(err) !== undefined || isUnavailable(err);
 }
 
 export function classifyDatabaseError(

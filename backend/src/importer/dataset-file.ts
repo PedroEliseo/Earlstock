@@ -34,9 +34,10 @@ export async function readDatasetFile(
   try {
     handle = await open(filePath, 'r');
   } catch (err) {
-    throw new DatasetFileError(`cannot open the dataset file: ${(err as Error).message}`, {
-      cause: err,
-    });
+    // The OS message (and so a cause) contains the full path, which must not reach the logs; the
+    // file name and the error code are enough for the operator, who passed the path.
+    const code = (err as NodeJS.ErrnoException).code ?? 'unknown error';
+    throw new DatasetFileError(`cannot open the dataset file ${fileName} (${code})`);
   }
   try {
     const info = await handle.stat();
