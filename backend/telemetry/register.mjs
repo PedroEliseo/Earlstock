@@ -16,7 +16,7 @@ import { isMainThread } from 'node:worker_threads';
 const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
 
 if (endpoint && isMainThread) {
-  const { startNodeSDK, createAddHookMessageChannel } =
+  const { startNodeSDK, createAddHookMessageChannel, metrics } =
     await import('@elastic/opentelemetry-node/sdk');
   const { registerOptions, waitForAllMessagesAcknowledged } = createAddHookMessageChannel();
   register('@elastic/opentelemetry-node/hook.mjs', import.meta.url, registerOptions);
@@ -29,7 +29,21 @@ if (endpoint && isMainThread) {
   process.env.OTEL_NODE_DISABLED_INSTRUMENTATIONS ??= 'router,dns,net';
   process.env.OTEL_NODE_RESOURCE_DETECTORS ??= 'env,process,serviceinstance,os,host';
 
-  const sdk = startNodeSDK({ elasticSetupShutdownHandlers: false });
+  // The pg instrumentation's pool metrics are updated from pool events, so they lag one event behind
+  // (an idle pool still reports a used connection) and report max 0 after the pool ends. They are
+  // dropped here with standard metric views; src/db/pool-metrics.ts exports accurate replacements
+  // (earlstock.db.pool.*). The instrumentation's spans and its query-duration histogram are kept.
+  const views = [
+    'db.client.connection.count',
+    'db.client.connection.pending_requests',
+    'db.client.connection.max',
+  ].map((instrumentName) => ({
+    meterName: '@opentelemetry/instrumentation-pg',
+    instrumentName,
+    aggregation: { type: metrics.AggregationType.DROP },
+  }));
+
+  const sdk = startNodeSDK({ elasticSetupShutdownHandlers: false, views });
   // Read by src/shared/telemetry.ts; absent when telemetry is off.
   globalThis[Symbol.for('earlstock.telemetry')] = { shutdown: () => sdk.shutdown() };
 

@@ -1,3 +1,4 @@
+import { metrics, ValueType } from '@opentelemetry/api';
 import type { NextFunction, Request, Response } from 'express';
 import {
   DatabaseTimeoutError,
@@ -48,9 +49,19 @@ export function notFoundHandler(req: Request, res: Response): void {
  * Express identifies error middleware by its 4-argument signature, so `_next` must stay.
  */
 export function createErrorHandler(logger: Logger = defaultLogger) {
+  // HTTP metrics show the status code only, and three different causes answer 503; this counter
+  // says which one. Its only attribute is the error code, a closed set (no route, path or ticker).
+  // A no-op without the telemetry preload.
+  const serverErrors = metrics.getMeter('earlstock').createCounter('earlstock.api.server_errors', {
+    description: 'Server-side (5xx) API error responses, by error code.',
+    unit: '{response}',
+    valueType: ValueType.INT,
+  });
+
   return (err: unknown, req: Request, res: Response, _next: NextFunction): void => {
     const { status, body, retryAfterSeconds } = toErrorResponse(err);
     if (status >= 500) {
+      serverErrors.add(1, { 'error.type': body.code });
       const fields = {
         code: body.code,
         status,

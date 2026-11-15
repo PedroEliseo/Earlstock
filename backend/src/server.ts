@@ -1,11 +1,13 @@
 import { createApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { createPool, poolStats } from './db/pool.js';
+import { observePool } from './db/pool-metrics.js';
 import { logger, serializeError } from './shared/logger.js';
 import { shutdownTelemetry } from './shared/telemetry.js';
 
 const env = loadEnv();
 const pool = createPool(env);
+observePool(pool, env.DATABASE_POOL_MAX);
 const app = createApp({ pool });
 
 const server = app.listen(env.PORT, () => {

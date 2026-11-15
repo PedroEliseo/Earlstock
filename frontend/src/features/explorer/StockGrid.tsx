@@ -70,13 +70,6 @@ function StockCard({ stock }: { stock: StockSummary }) {
               </Box>
             </Box>
           </Stack>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{ mt: 'auto', fontVariantNumeric: 'tabular-nums' }}
-          >
-            Daily prices {stock.firstDate} – {stock.lastDate}
-          </Typography>
         </Stack>
       </CardActionArea>
     </Card>
