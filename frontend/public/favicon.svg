@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">EarlStock</title>
+  <rect width="64" height="64" rx="14" fill="#0b5cad"/>
+  <!-- rising price line -->
+  <polyline points="15,25 25,18 33,21 45,11" fill="none" stroke="#4cc38a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="39,8.5 49,7.5 48,17.5" fill="#4cc38a"/>
+  <!-- moustache: left half, mirrored for the right -->
+  <g fill="#ffffff">
+    <path id="m" d="M32 32.5 C27 29.5 20 29.5 15.5 33.5 C12.5 36 10.5 39.5 9.5 44 C9.2 45.6 10.6 46.4 12 45.6 C15.5 43.4 19.5 42.3 23.5 41.8 C27 41.3 30 40.2 32 38.8 Z"/>
+    <use href="#m" transform="translate(64 0) scale(-1 1)"/>
+  </g>
+</svg>

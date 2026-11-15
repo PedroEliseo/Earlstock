@@ -1,3 +1,5 @@
+<p align="center"><img src="frontend/public/favicon.svg" alt="EarlStock logo" width="96" height="96"></p>
+
 # EarlStock – Historical Stock Market Explorer
 
 EarlStock explores historical daily stock prices: browse the stocks of a dataset, inspect one stock's
