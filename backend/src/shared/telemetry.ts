@@ -55,6 +55,16 @@ interface TelemetryHandle {
 
 const HANDLE_KEY = Symbol.for('earlstock.telemetry');
 
+let shuttingDown = false;
+
+/**
+ * True once shutdownTelemetry() has started: records emitted after that can no longer be exported
+ * (the SDK only warns about them), so the logger then writes to the console only.
+ */
+export function isTelemetryShuttingDown(): boolean {
+  return shuttingDown;
+}
+
 /** Upper bound on how long flushing telemetry may delay process exit. */
 export const TELEMETRY_SHUTDOWN_TIMEOUT_MS = 3000;
 
@@ -69,6 +79,7 @@ export async function shutdownTelemetry(
 ): Promise<TelemetryShutdownResult> {
   const handle = (globalThis as Record<symbol, TelemetryHandle | undefined>)[HANDLE_KEY];
   if (!handle) return 'disabled';
+  shuttingDown = true;
 
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<'timed-out'>((resolve) => {
